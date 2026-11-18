@@ -66,7 +66,7 @@ Supports Windows (x64/x86), Linux (x64/arm64) and macOS 11+ (intel/apple).
 
 ### 永雏塔菲的魔法卷轴 · 按量付费
 
-想让代理按实际用量扣费？**[用我的邀请链接注册](https://hasucn.me/i/4mK1WOmx)**，充值后即可在网站获取 Clash Verge Rev 订阅。使用代理时，流量按所选节点的单价从账户余额扣费。
+永雏塔菲的魔法卷轴提供按量计费的代理订阅。[注册账号](https://hasucn.me/i/4mK1WOmx)并充值后，即可获取 Clash Verge Rev 订阅。使用代理时，流量按所选节点的单价从账户余额扣费。
 
 导入订阅后，可在 Clash Verge Rev 的「代理」页选择节点。在本项目的「流量统计」中，还可以查看各应用、各节点用了多少流量。节点名带有每 GB 单价时，页面会同时展示预估费用。
 
