@@ -64,13 +64,11 @@ Supports Windows (x64/x86), Linux (x64/arm64) and macOS 11+ (intel/apple).
 
 ## 推广
 
-### 永雏塔菲的魔法卷轴 · 按量付费
+### [永雏塔菲的魔法卷轴](https://hasucn.me/i/4mK1WOmx) · 按量付费
 
 永雏塔菲的魔法卷轴（Taffy Cloud）提供可导入 Clash Verge Rev 的代理订阅。注册并充值后，可在网站获取订阅链接。使用代理产生的流量按所用节点的单价从账户余额扣费，方便按实际用量管理开销。
 
 导入订阅后，可在 Clash Verge Rev 的「代理」页选择节点。在本项目的「流量统计」中，还可以查看各应用、各节点用了多少流量。节点名带有每 GB 单价时，页面会同时展示预估费用。
-
-[通过邀请链接访问](https://hasucn.me/i/4mK1WOmx) · [Clash Verge 使用教程](https://cnhdoc.cfd/help/clash_verge.html) · [计费规则](https://cnhdoc.cfd/qa/jifei.html)
 
 ---
 
