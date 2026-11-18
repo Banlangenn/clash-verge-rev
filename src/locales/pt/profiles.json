@@ -136,6 +136,10 @@
         "uidMissing": "O identificador do perfil está ausente",
         "saveFailed": "Falha ao salvar o perfil"
       },
+      "presets": {
+        "hours": "{{count}} h",
+        "days": "{{count}} d"
+      },
       "warnings": {
         "frequentUpdate": "Um intervalo curto recarrega o núcleo com essa frequência e derruba as conexões existentes. Recomendados: {{minutes}} minutos (24 horas)."
       },

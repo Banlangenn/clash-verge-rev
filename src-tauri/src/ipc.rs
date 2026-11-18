@@ -64,6 +64,7 @@ pub fn builder() -> tauri_specta::Builder<tauri::Wry> {
             cmd::patch_verge_config,
             cmd::test_delay,
             cmd::get_app_dir,
+            cmd::get_traffic_history,
             cmd::copy_icon_file,
             cmd::download_icon_cache,
             cmd::open_devtools,

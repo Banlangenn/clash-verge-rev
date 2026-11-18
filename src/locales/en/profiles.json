@@ -136,6 +136,7 @@
         "uidMissing": "The profile identifier is missing",
         "saveFailed": "Failed to save profile"
       },
+      "presets": { "hours": "{{count}} h", "days": "{{count}} d" },
       "warnings": {
         "frequentUpdate": "A short interval reloads the core that often and drops existing connections. {{minutes}} minutes (24 hours) is recommended."
       },

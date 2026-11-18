@@ -136,6 +136,10 @@
         "uidMissing": "Die Abonnement-Kennung fehlt",
         "saveFailed": "Abonnement konnte nicht gespeichert werden"
       },
+      "presets": {
+        "hours": "{{count}} h",
+        "days": "{{count}} d"
+      },
       "warnings": {
         "frequentUpdate": "Ein kurzes Intervall lädt den Kern entsprechend häufig neu und trennt bestehende Verbindungen. Empfohlen werden {{minutes}} Minuten (24 Stunden)."
       },

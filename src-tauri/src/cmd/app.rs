@@ -1,4 +1,5 @@
 use super::CmdResult;
+use crate::core::traffic_history::{self, TrafficDimension, TrafficRoute, TrafficSummary};
 use crate::{
     cmd::StringifyErr as _,
     core::{SilentUpdater, updater::DownloadEvent},
@@ -7,6 +8,20 @@ use crate::{
 };
 use smartstring::alias::String;
 use tauri::{AppHandle, Manager as _, ipc::Channel};
+
+#[tauri::command]
+#[specta::specta]
+pub async fn get_traffic_history(
+    from: i64,
+    until: i64,
+    route: TrafficRoute,
+    dimension: TrafficDimension,
+    process: Option<std::string::String>,
+) -> CmdResult<TrafficSummary> {
+    traffic_history::read_summary(from, until, route, dimension, process)
+        .await
+        .stringify_err()
+}
 
 #[tauri::command]
 #[specta::specta]

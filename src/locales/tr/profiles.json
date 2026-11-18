@@ -136,6 +136,10 @@
         "uidMissing": "Profil tanımlayıcısı eksik",
         "saveFailed": "Profil kaydedilemedi"
       },
+      "presets": {
+        "hours": "{{count}} h",
+        "days": "{{count}} d"
+      },
       "warnings": {
         "frequentUpdate": "Kısa bir aralık çekirdeği o sıklıkta yeniden yükler ve mevcut bağlantıları koparır. {{minutes}} dakika (24 saat) önerilir."
       },

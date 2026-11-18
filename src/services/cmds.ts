@@ -7,6 +7,8 @@ import { debugLog } from '@/utils/debug'
 import { commands } from './bindings'
 import type {
   DownloadEvent,
+  TrafficDimension,
+  TrafficRoute,
   JsonValue,
   ListenerProbe,
   ProxyPortSettings,
@@ -29,6 +31,16 @@ export type {
   ListenerProbe,
   UnlockItem,
 } from './bindings'
+
+export function getTrafficHistory(
+  from: number,
+  until: number,
+  route: TrafficRoute,
+  dimension: TrafficDimension,
+  process: string | null,
+) {
+  return commands.getTrafficHistory(from, until, route, dimension, process)
+}
 
 export async function copyClashEnv() {
   return commands.copyClashEnv()

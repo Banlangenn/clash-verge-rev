@@ -136,6 +136,10 @@
         "uidMissing": "Falta el identificador de la suscripción",
         "saveFailed": "No se pudo guardar la suscripción"
       },
+      "presets": {
+        "hours": "{{count}} h",
+        "days": "{{count}} d"
+      },
       "warnings": {
         "frequentUpdate": "Un intervalo corto recarga el núcleo con esa frecuencia y corta las conexiones existentes. Se recomiendan {{minutes}} minutos (24 horas)."
       },

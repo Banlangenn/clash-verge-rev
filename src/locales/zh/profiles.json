@@ -136,6 +136,7 @@
         "uidMissing": "缺少订阅标识",
         "saveFailed": "保存订阅失败"
       },
+      "presets": { "hours": "{{count}} 小时", "days": "{{count}} 天" },
       "warnings": {
         "frequentUpdate": "间隔过短会频繁触发内核重载并中断现有连接，建议使用默认值 {{minutes}} 分钟（24 小时）"
       },

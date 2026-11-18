@@ -48,5 +48,15 @@
       "!.pnpm-lock.yaml",
       "!.vfox"
     ]
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["src/components/traffic-history/traffic-history.css"],
+      "css": {
+        "parser": {
+          "tailwindDirectives": true
+        }
+      }
+    }
+  ]
 }

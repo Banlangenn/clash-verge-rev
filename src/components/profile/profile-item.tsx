@@ -52,6 +52,7 @@ import { openExternalUrl } from '@/utils/open-external-url'
 import parseTraffic from '@/utils/parse-traffic'
 
 import { EnhanceHint } from './enhance-hint'
+import { ProfileAutoUpdate } from './profile-auto-update'
 import { ProfileBox } from './profile-box'
 import { ProxiesEditorViewer } from './proxies-editor-viewer'
 import { QrViewer } from './qr-viewer'
@@ -130,6 +131,7 @@ const ProfileItemBase = (props: ProfileItemProps) => {
   const fetchNextUpdateTimeCallback = useCallback(
     async (forceRefresh = false) => {
       if (
+        itemData.option?.allow_auto_update !== false &&
         itemData.option?.update_interval &&
         itemData.option.update_interval > 0
       ) {
@@ -189,7 +191,12 @@ const ProfileItemBase = (props: ProfileItemProps) => {
         )
       }
     },
-    [itemData.option?.update_interval, itemData.uid, t],
+    [
+      itemData.option?.allow_auto_update,
+      itemData.option?.update_interval,
+      itemData.uid,
+      t,
+    ],
   )
   const fetchNextUpdateTime = useLockFn(fetchNextUpdateTimeCallback)
 
@@ -214,6 +221,7 @@ const ProfileItemBase = (props: ProfileItemProps) => {
   }, [
     fetchNextUpdateTime,
     showNextUpdate,
+    itemData.option?.allow_auto_update,
     itemData.option?.update_interval,
     updated,
   ])
@@ -834,6 +842,13 @@ const ProfileItemBase = (props: ProfileItemProps) => {
               {parseExpire(updated!)}
             </span>
           </Box>
+        )}
+        {itemData.type === 'remote' && uid && !batchMode && (
+          <ProfileAutoUpdate
+            profileId={uid}
+            option={option ?? undefined}
+            onSaved={mutateProfiles}
+          />
         )}
         <LinearProgress
           variant="determinate"

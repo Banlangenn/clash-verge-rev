@@ -136,6 +136,10 @@
         "uidMissing": "Pengenal profil tidak ada",
         "saveFailed": "Gagal menyimpan profil"
       },
+      "presets": {
+        "hours": "{{count}} h",
+        "days": "{{count}} d"
+      },
       "warnings": {
         "frequentUpdate": "Interval yang singkat membuat inti dimuat ulang sesering itu dan memutus koneksi yang aktif. Disarankan {{minutes}} menit (24 jam)."
       },

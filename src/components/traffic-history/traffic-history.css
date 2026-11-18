@@ -1,0 +1,61 @@
+@layer theme, base, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+@import "tw-animate-css";
+
+@source "./";
+@source "../ui";
+
+@custom-variant dark (
+  &:where([data-traffic-theme="dark"], [data-traffic-theme="dark"] *)
+);
+
+@theme inline {
+  --color-background: var(--traffic-surface);
+  --color-foreground: var(--traffic-foreground);
+  --color-popover: var(--traffic-surface);
+  --color-popover-foreground: var(--traffic-foreground);
+  --color-primary: var(--primary-main, #5b5c9d);
+  --color-primary-foreground: #fff;
+  --color-secondary: var(--traffic-muted);
+  --color-secondary-foreground: var(--traffic-foreground);
+  --color-muted: var(--traffic-muted);
+  --color-muted-foreground: var(--traffic-subtle);
+  --color-accent: var(--traffic-muted);
+  --color-accent-foreground: var(--traffic-foreground);
+  --color-border: var(--traffic-border);
+  --color-input: var(--traffic-border);
+  --color-ring: var(--primary-main, #5b5c9d);
+  --color-destructive: #d32f2f;
+}
+
+[data-traffic-theme="light"] {
+  --traffic-surface: #fff;
+  --traffic-foreground: #1f1f1f;
+  --traffic-subtle: #60636c;
+  --traffic-muted: #f1f2f6;
+  --traffic-border: #dedfe6;
+}
+
+[data-traffic-theme="dark"] {
+  --traffic-surface: #252631;
+  --traffic-foreground: #f3f3f6;
+  --traffic-subtle: #b6b8c6;
+  --traffic-muted: #343544;
+  --traffic-border: #474958;
+}
+
+@layer base {
+  [data-traffic-theme] :where(button, input),
+  [data-traffic-theme][data-slot="popover-content"] {
+    box-sizing: border-box;
+    margin: 0;
+    border: 0 solid var(--traffic-border);
+    font-family: inherit;
+  }
+
+  [data-traffic-theme] :where(button, input) {
+    background-color: transparent;
+  }
+}

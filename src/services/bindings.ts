@@ -130,6 +130,20 @@ export const commands = {
     __TAURI_INVOKE<null>('patch_verge_config', { payload }),
   testDelay: (url: string) => __TAURI_INVOKE<number>('test_delay', { url }),
   getAppDir: () => __TAURI_INVOKE<string>('get_app_dir'),
+  getTrafficHistory: (
+    from: number,
+    until: number,
+    route: TrafficRoute,
+    dimension: TrafficDimension,
+    process: string | null,
+  ) =>
+    __TAURI_INVOKE<TrafficSummary>('get_traffic_history', {
+      from,
+      until,
+      route,
+      dimension,
+      process,
+    }),
   copyIconFile: (path: string, iconInfo: IconInfo) =>
     __TAURI_INVOKE<string>('copy_icon_file', { path, iconInfo }),
   downloadIconCache: (url: string, name: string) =>
@@ -994,6 +1008,40 @@ export type SystemProxy = {
 export type ToggleableProxyPort = {
   enabled: boolean
   port: number
+}
+
+export type TrafficAmount = {
+  upload: number
+  download: number
+}
+
+export type TrafficBreakdown = {
+  name: string
+  upload: number
+  download: number
+}
+
+export type TrafficDimension = 'application' | 'destination' | 'node'
+
+export type TrafficPoint = {
+  minute: number
+  upload: number
+  download: number
+  estimatedCost: number | null
+}
+
+export type TrafficRoute = 'proxy' | 'direct'
+
+export type TrafficSummary = {
+  firstMinute: number | null
+  lastMinute: number | null
+  sampledMinutes: number
+  coreAmount: TrafficAmount
+  unattributed: TrafficAmount
+  amount: TrafficAmount
+  estimatedCost: number | null
+  points: TrafficPoint[]
+  breakdown: TrafficBreakdown[]
 }
 
 export type UnlockItem = {

@@ -373,44 +373,48 @@ export function ProfileViewer({ onChange, ref }: ProfileViewerProps) {
               />
             )}
           />
-          <Controller
-            name="option.update_interval"
-            control={control}
-            render={({ field }) => {
-              const interval = Number(field.value)
-              const tooFrequent =
-                Number.isFinite(interval) &&
-                interval > 0 &&
-                interval < MIN_UPDATE_INTERVAL
+          {openType === 'new' && (
+            <Controller
+              name="option.update_interval"
+              control={control}
+              render={({ field }) => {
+                const interval = Number(field.value)
+                const tooFrequent =
+                  Number.isFinite(interval) &&
+                  interval > 0 &&
+                  interval < MIN_UPDATE_INTERVAL
 
-              return (
-                <TextField
-                  {...text}
-                  {...field}
-                  type="number"
-                  label={t('profiles.modals.profileForm.fields.updateInterval')}
-                  helperText={
-                    tooFrequent
-                      ? t(
-                          'profiles.modals.profileForm.warnings.frequentUpdate',
-                          { minutes: MIN_UPDATE_INTERVAL },
-                        )
-                      : undefined
-                  }
-                  slotProps={{
-                    formHelperText: { sx: { color: 'warning.main' } },
-                    input: {
-                      endAdornment: (
-                        <InputAdornment position="end">
-                          {t('shared.units.minutes')}
-                        </InputAdornment>
-                      ),
-                    },
-                  }}
-                />
-              )
-            }}
-          />
+                return (
+                  <TextField
+                    {...text}
+                    {...field}
+                    type="number"
+                    label={t(
+                      'profiles.modals.profileForm.fields.updateInterval',
+                    )}
+                    helperText={
+                      tooFrequent
+                        ? t(
+                            'profiles.modals.profileForm.warnings.frequentUpdate',
+                            { minutes: MIN_UPDATE_INTERVAL },
+                          )
+                        : undefined
+                    }
+                    slotProps={{
+                      formHelperText: { sx: { color: 'warning.main' } },
+                      input: {
+                        endAdornment: (
+                          <InputAdornment position="end">
+                            {t('shared.units.minutes')}
+                          </InputAdornment>
+                        ),
+                      },
+                    }}
+                  />
+                )
+              }}
+            />
+          )}
           <Controller
             name="option.with_proxy"
             control={control}
@@ -450,22 +454,24 @@ export function ProfileViewer({ onChange, ref }: ProfileViewerProps) {
             )}
           />
 
-          <Controller
-            name="option.allow_auto_update"
-            control={control}
-            render={({ field }) => (
-              <StyledBox>
-                <InputLabel>
-                  {t('profiles.modals.profileForm.fields.allowAutoUpdate')}
-                </InputLabel>
-                <Switch
-                  checked={field.value ?? true}
-                  {...field}
-                  color="primary"
-                />
-              </StyledBox>
-            )}
-          />
+          {openType === 'new' && (
+            <Controller
+              name="option.allow_auto_update"
+              control={control}
+              render={({ field }) => (
+                <StyledBox>
+                  <InputLabel>
+                    {t('profiles.modals.profileForm.fields.allowAutoUpdate')}
+                  </InputLabel>
+                  <Switch
+                    checked={field.value ?? true}
+                    {...field}
+                    color="primary"
+                  />
+                </StyledBox>
+              )}
+            />
+          )}
         </>
       )}
     </BaseDialog>

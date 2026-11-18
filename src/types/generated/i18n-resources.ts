@@ -33,6 +33,45 @@ export interface TranslationResources {
           uploadSpeed: string
         }
       }
+      history: {
+        afternoon: string
+        allDay: string
+        application: string
+        bar: string
+        breakdown: string
+        chart: string
+        clearApplication: string
+        coreTotal: string
+        coverage: string
+        customTime: string
+        date: string
+        destination: string
+        direct: string
+        download: string
+        endTime: string
+        estimatedCost: string
+        groupBy: string
+        invalidRange: string
+        morning: string
+        node: string
+        noSamples: string
+        noTraffic: string
+        other: string
+        proxy: string
+        readError: string
+        route: string
+        share: string
+        startTime: string
+        timeRange: string
+        title: string
+        today: string
+        total: string
+        trend: string
+        unattributed: string
+        unknown: string
+        upload: string
+        yesterday: string
+      }
       page: {
         title: string
       }
@@ -395,6 +434,10 @@ export interface TranslationResources {
             useClashProxy: string
             userAgent: string
             useSystemProxy: string
+          }
+          presets: {
+            days: string
+            hours: string
           }
           title: {
             create: string
@@ -1589,6 +1632,7 @@ export interface TranslationResources {
           noDisney: string
           originalsOnly: string
           pending: string
+          risky: string
           unsupportedRegion: string
           yes: string
         }

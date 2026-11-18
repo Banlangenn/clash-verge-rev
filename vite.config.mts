@@ -1,5 +1,6 @@
 import path from 'node:path'
 
+import tailwind from '@tailwindcss/vite'
 import legacy from '@vitejs/plugin-legacy'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
@@ -10,6 +11,7 @@ export default defineConfig({
   server: { port: 3000 },
   plugins: [
     svgr(),
+    tailwind(),
     react(),
     legacy({
       modernTargets: ['edge>=109', 'safari>=14'],
