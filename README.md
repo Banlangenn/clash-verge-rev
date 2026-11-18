@@ -21,6 +21,16 @@ A Clash Meta GUI based on <a href="https://github.com/tauri-apps/tauri">Tauri</a
   <a href="./README.md">简体中文</a>
 </p>
 
+## 流量版改动
+
+本 fork 基于 Clash Verge Rev v2.5.10。
+
+- 左侧主菜单新增「流量统计」，可按日期、时段和代理或直连筛选，查看应用、目标地址及节点的流量排行和占比。
+- 堆叠柱图展示上传与下载流量，悬停可查看对应时段和用量。
+- 如果节点名称以「| 0.35」这类单价结尾，统计页会按每 GB 0.35 元估算上传与下载的费用。没有可用单价时隐藏费用。
+- Windows 版可将旧流量账本导入应用，并继续在应用内记录用量。
+- 订阅卡片可直接开关定时更新，并用快捷按钮选择更新间隔。
+
 ## Preview
 
 | Dark                             | Light                             |
@@ -28,6 +38,10 @@ A Clash Meta GUI based on <a href="https://github.com/tauri-apps/tauri">Tauri</a
 | ![预览](./docs/preview_dark.png) | ![预览](./docs/preview_light.png) |
 
 ## Install
+
+流量版提供 Windows x64 便携包。解压后先退出正在运行的 Clash Verge，再打开文件夹内的 clash-verge.exe。[下载流量版](https://github.com/Banlangenn/clash-verge-rev/releases/tag/traffic-v2.5.10.1)
+
+### 上游发行版
 
 请到发布页面下载对应的安装包：[Release page](https://github.com/clash-verge-rev/clash-verge-rev/releases)<br>
 Go to the [Release page](https://github.com/clash-verge-rev/clash-verge-rev/releases) to download the corresponding installation package<br>
@@ -48,33 +62,9 @@ Supports Windows (x64/x86), Linux (x64/arm64) and macOS 11+ (intel/apple).
 
 ---
 
-## Promotion
+## 推广
 
-### ✈️ [AI云边 -- 全新架构机场 ClaudeBorder](https://cruise.54678999.xyz/#/register?code=58q5UJZc)
-
-🔥热销中使用本链接注册即送 **3 天免费试用**，每日 **1GB 流量**：👉 [点此注册](https://cruise.54678999.xyz/#/register?code=58q5UJZc)
-
-#### AI云边 -- 全新架构机场。
-
-- 💻 多次**技术迭代后**全新亮相。
-- 🗺 全**高速稳定**正价节点。
-- 🌏 **海外团队**，不跑路
-- 🚀 线路**冗余**设计，**自动化运维**对抗各类封锁
-- 👨‍🦲 团队架构师为**大厂**网络架构师
-- 💰 极致**稳定**，亲民价**价格**
-- 🌐 全面支持**流媒体及各AI访问**
-- 🙋 7*12小时真人客服。解决您的各类问题。
-
-🌐 官网：👉 [https://www.claudeborder.com](https://cruise.54678999.xyz/#/register?code=58q5UJZc)
-
-### 🤖 [GPTKefu —— 与 Crisp 深度整合的 AI 智能客服平台](https://gptkefu.com)
-
-- 🧠 深度理解完整对话上下文 + 图片识别，自动给出专业、精准的回复，告别机械式客服。
-- ♾️ **不限回答数量**，无额度焦虑，区别于其他按条计费的 AI 客服产品。
-- 💬 售前咨询、售后服务、复杂问题解答，全场景轻松覆盖，真实用户案例已验证效果。
-- ⚡ 3 分钟极速接入，零门槛上手，即刻提升客服效率与客户满意度。
-- 🎁 高级套餐免费试用 14 天，先体验后付费：👉 [立即试用](https://gptkefu.com)
-- 📢 智能客服TG 频道：[@crisp_ai](https://t.me/crisp_ai)
+[永雏塔菲的魔法卷轴](https://hasucn.me/i/4mK1WOmx) · 按量付费
 
 ---
 
