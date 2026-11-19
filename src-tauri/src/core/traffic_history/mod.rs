@@ -27,19 +27,19 @@ pub struct TrafficAmount {
 }
 
 impl TrafficAmount {
-    fn delta(self, previous: Self) -> Self {
+    const fn delta(self, previous: Self) -> Self {
         Self {
             upload: self.upload.saturating_sub(previous.upload),
             download: self.download.saturating_sub(previous.download),
         }
     }
 
-    fn add(&mut self, amount: Self) {
+    const fn add(&mut self, amount: Self) {
         self.upload += amount.upload;
         self.download += amount.download;
     }
 
-    fn is_empty(self) -> bool {
+    const fn is_empty(self) -> bool {
         self.upload == 0 && self.download == 0
     }
 }
@@ -246,9 +246,10 @@ impl Sampler {
                     destination: connection.destination,
                     node: connection.node,
                 };
-                let minute = floor_minute(connection.recorded_at);
-                if connection.recorded_at > 0
-                    && connection.recorded_at >= previous.sampled_at
+                let recorded_at = connection.recorded_at;
+                let minute = floor_minute(recorded_at);
+                if recorded_at > 0
+                    && recorded_at >= previous.sampled_at
                     && minute >= earliest_event_minute
                     && minute < sample_minute
                 {
@@ -325,7 +326,7 @@ fn current_minute() -> i64 {
     floor_minute(Utc::now().timestamp())
 }
 
-fn floor_minute(timestamp: i64) -> i64 {
+const fn floor_minute(timestamp: i64) -> i64 {
     timestamp - timestamp.rem_euclid(60)
 }
 

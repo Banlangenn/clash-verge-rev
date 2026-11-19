@@ -1,11 +1,10 @@
 use super::normalize_process;
-use network_interface::{NetworkInterface, NetworkInterfaceConfig};
+use network_interface::{NetworkInterface, NetworkInterfaceConfig as _};
 use std::{
     collections::{HashMap, HashSet},
     ffi::c_void,
     mem::{align_of, size_of},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    ptr::null_mut,
 };
 use tauri_plugin_mihomo::models::{ConnectionMetaData, Network};
 use windows_sys::Win32::{
@@ -148,7 +147,7 @@ fn udp_owner(owners: &Owners<UdpEndpoint>, ip: IpAddr, port: u16) -> Option<u32>
     }
 }
 
-fn decode_port(port: u32) -> u16 {
+const fn decode_port(port: u32) -> u16 {
     u16::from_be(port as u16)
 }
 
@@ -186,7 +185,7 @@ fn read_table<Row: Copy>(read: ReadOwnerTable, family: u32, class: i32) -> Vec<R
 fn read_process_name(owner: u32) -> String {
     // Query only the process image basename, without opening a handle for memory or modification.
     let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, owner) };
-    if process == null_mut() {
+    if process.is_null() {
         return String::new();
     }
     let mut path = [0_u16; 4096];

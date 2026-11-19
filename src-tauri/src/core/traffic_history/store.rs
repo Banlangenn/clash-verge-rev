@@ -305,20 +305,20 @@ pub(super) fn summary(
         let minute = row.get(0)?;
         let upload: u64 = row.get(2)?;
         let download: u64 = row.get(3)?;
-        if points.last().is_none_or(|point| point.minute != minute) {
+        let estimated_cost = estimate_cost(scope, row.get_ref(1)?.as_str()?, upload, download);
+        if let Some(point) = points.last_mut().filter(|point| point.minute == minute) {
+            point.upload += upload;
+            point.download += download;
+            if let Some(cost) = estimated_cost {
+                *point.estimated_cost.get_or_insert(0.0) += cost;
+            }
+        } else {
             points.push(TrafficPoint {
                 minute,
-                upload: 0,
-                download: 0,
-                estimated_cost: None,
+                upload,
+                download,
+                estimated_cost,
             });
-        }
-        let point = points.last_mut().expect("point initialized for minute");
-        point.upload += upload;
-        point.download += download;
-
-        if let Some(cost) = estimate_cost(scope, row.get_ref(1)?.as_str()?, upload, download) {
-            *point.estimated_cost.get_or_insert(0.0) += cost;
         }
     }
     let amount = points.iter().fold(TrafficAmount::default(), |mut total, point| {
@@ -396,7 +396,7 @@ pub(super) fn summary(
     })
 }
 
-pub(super) fn retention_cutoff(minute: i64) -> i64 {
+pub(super) const fn retention_cutoff(minute: i64) -> i64 {
     minute - Duration::days(7).num_seconds() + 60
 }
 
@@ -444,8 +444,12 @@ mod tests {
 
         let result = summary(&database, 60, 240, TrafficRoute::Proxy, TrafficDimension::Node, None)?;
         assert_eq!(result.amount.download, 5 * traffic.download);
-        assert!((result.estimated_cost.unwrap() - 0.55).abs() < 1e-12);
-        assert!((result.points[0].estimated_cost.unwrap() - 0.55).abs() < 1e-12);
+        assert!(result.estimated_cost.is_some_and(|cost| (cost - 0.55).abs() < 1e-12));
+        assert!(
+            result.points[0]
+                .estimated_cost
+                .is_some_and(|cost| (cost - 0.55).abs() < 1e-12)
+        );
         assert_eq!(result.points[1].estimated_cost, None);
         assert_eq!(result.points[2].estimated_cost, Some(0.0));
         let filtered = summary(
