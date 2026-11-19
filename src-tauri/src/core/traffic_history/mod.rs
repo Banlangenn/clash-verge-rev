@@ -1,16 +1,24 @@
+mod capture;
 mod store;
 #[cfg(windows)]
 mod windows_process;
 
 use crate::{Type, core::handle::Handle, logging, process::AsyncHandler, utils::dirs};
 use anyhow::{Context as _, Result, ensure};
+use capture::ClosedTraffic;
 use chrono::Utc;
 use serde::Serialize;
-use std::{collections::HashMap, path::PathBuf, time::Duration};
+use std::{
+    collections::{BTreeMap, HashMap},
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
 use tauri_plugin_mihomo::models::{ConnectionMetaData, Connections};
 
-const SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
+const SAMPLE_INTERVAL: Duration = Duration::from_secs(3);
 const SAMPLE_TIMEOUT: Duration = Duration::from_secs(3);
+const SAMPLE_GAP_SECONDS: i64 = 12;
 
 #[derive(Clone, Copy, Default, Serialize, specta::Type)]
 pub struct TrafficAmount {
@@ -60,11 +68,15 @@ pub struct TrafficPoint {
     estimated_cost: Option<f64>,
 }
 
-#[derive(Serialize, specta::Type)]
+#[derive(Clone, Serialize, specta::Type)]
 pub struct TrafficBreakdown {
     name: String,
     upload: u64,
     download: u64,
+    #[serde(rename = "estimatedCost")]
+    estimated_cost: Option<f64>,
+    #[serde(rename = "partialCost")]
+    partial_cost: bool,
 }
 
 #[derive(Serialize, specta::Type)]
@@ -73,12 +85,17 @@ pub struct TrafficSummary {
     first_minute: Option<i64>,
     last_minute: Option<i64>,
     sampled_minutes: u64,
+    capture_minutes: Vec<i64>,
+    interrupted_minutes: Vec<i64>,
+    last_sample_at: Option<i64>,
     core_amount: TrafficAmount,
     unattributed: TrafficAmount,
+    unknown_application: TrafficAmount,
     amount: TrafficAmount,
     estimated_cost: Option<f64>,
     points: Vec<TrafficPoint>,
     breakdown: Vec<TrafficBreakdown>,
+    cost_breakdown: Vec<TrafficBreakdown>,
 }
 
 #[derive(Default, Eq, Hash, PartialEq)]
@@ -89,6 +106,8 @@ struct Bucket {
     node: String,
 }
 
+type TrafficBuckets = HashMap<Bucket, TrafficAmount>;
+
 struct ConnectionSample {
     amount: TrafficAmount,
     process: String,
@@ -96,6 +115,7 @@ struct ConnectionSample {
 
 #[derive(Default)]
 struct Sample {
+    sampled_at: i64,
     amount: TrafficAmount,
     connections: HashMap<String, ConnectionSample>,
 }
@@ -127,13 +147,20 @@ fn connection_process(metadata: &ConnectionMetaData, previous: Option<&Connectio
 
 #[derive(Default)]
 struct Sampler {
+    sampled_at: i64,
     #[cfg(windows)]
-    socket_owners: Option<windows_process::SocketOwners>,
+    socket_owners: windows_process::SocketOwners,
 }
 
 impl Sampler {
-    fn measure(mut self, snapshot: Connections, previous: Option<&Sample>) -> (Sample, HashMap<Bucket, TrafficAmount>) {
+    fn measure(
+        mut self,
+        snapshot: Connections,
+        previous: Option<&Sample>,
+        closed: Vec<ClosedTraffic>,
+    ) -> (Sample, TrafficBuckets, BTreeMap<i64, TrafficBuckets>) {
         let mut current = Sample {
+            sampled_at: self.sampled_at,
             amount: TrafficAmount {
                 upload: snapshot.upload_total,
                 download: snapshot.download_total,
@@ -143,7 +170,9 @@ impl Sampler {
         let previous = previous.filter(|previous| {
             previous.amount.upload <= current.amount.upload && previous.amount.download <= current.amount.download
         });
-        let mut buckets = HashMap::<Bucket, TrafficAmount>::new();
+        let mut buckets = TrafficBuckets::new();
+        let mut backfill = BTreeMap::<i64, TrafficBuckets>::new();
+        let mut closed_before_current_minute = Vec::new();
         let mut observed = TrafficAmount::default();
 
         for connection in snapshot.connections.into_iter().flatten() {
@@ -187,13 +216,73 @@ impl Sampler {
         }
 
         if let Some(previous) = previous {
+            let sample_minute = floor_minute(self.sampled_at);
+            let earliest_event_minute = store::retention_cutoff(sample_minute);
+            for connection in closed {
+                let Some(scope) = traffic_scope(&connection.node) else {
+                    continue;
+                };
+                let prior = previous.connections.get(&connection.id);
+                let amount = TrafficAmount {
+                    upload: connection.upload,
+                    download: connection.download,
+                };
+                let delta = if connection.increment {
+                    amount
+                } else {
+                    amount.delta(prior.map(|sample| sample.amount).unwrap_or_default())
+                };
+                if delta.is_empty() {
+                    continue;
+                }
+                let process = if connection.process.is_empty() {
+                    prior.map(|sample| sample.process.clone()).unwrap_or_default()
+                } else {
+                    normalize_process(&connection.process)
+                };
+                let bucket = Bucket {
+                    scope,
+                    process,
+                    destination: connection.destination,
+                    node: connection.node,
+                };
+                let minute = floor_minute(connection.recorded_at);
+                if connection.recorded_at > 0
+                    && connection.recorded_at >= previous.sampled_at
+                    && minute >= earliest_event_minute
+                    && minute < sample_minute
+                {
+                    closed_before_current_minute.push((minute, bucket, delta));
+                } else {
+                    buckets.entry(bucket).or_default().add(delta);
+                }
+                observed.add(delta);
+            }
             let delta = current.amount.delta(previous.amount);
+            let mut current_core = delta;
+            let reconciled = observed.upload <= delta.upload && observed.download <= delta.download;
+            for (minute, bucket, amount) in closed_before_current_minute {
+                if reconciled {
+                    let historical = backfill.entry(minute).or_default();
+                    historical.entry(bucket).or_default().add(amount);
+                    historical
+                        .entry(Bucket {
+                            scope: "core",
+                            ..Bucket::default()
+                        })
+                        .or_default()
+                        .add(amount);
+                    current_core = current_core.delta(amount);
+                } else {
+                    buckets.entry(bucket).or_default().add(amount);
+                }
+            }
             buckets.insert(
                 Bucket {
                     scope: "core",
                     ..Bucket::default()
                 },
-                delta,
+                current_core,
             );
             buckets.insert(
                 Bucket {
@@ -204,19 +293,19 @@ impl Sampler {
             );
         }
 
-        (current, buckets)
+        (current, buckets, backfill)
     }
 
     fn socket_process(&mut self, metadata: &ConnectionMetaData) -> String {
         #[cfg(windows)]
-        if matches!(metadata.network, tauri_plugin_mihomo::models::Network::TCP) {
-            return self
-                .socket_owners
-                .get_or_insert_with(windows_process::SocketOwners::read)
-                .resolve(metadata);
+        {
+            self.socket_owners.resolve(metadata)
         }
-        let _ = metadata;
-        String::new()
+        #[cfg(not(windows))]
+        {
+            let _ = metadata;
+            String::new()
+        }
     }
 }
 
@@ -233,8 +322,11 @@ fn database_path() -> Result<PathBuf> {
 }
 
 fn current_minute() -> i64 {
-    let now = Utc::now().timestamp();
-    now - now.rem_euclid(60)
+    floor_minute(Utc::now().timestamp())
+}
+
+fn floor_minute(timestamp: i64) -> i64 {
+    timestamp - timestamp.rem_euclid(60)
 }
 
 fn run_migration() -> Result<()> {
@@ -261,46 +353,83 @@ pub(crate) fn start() {
         }
         let mut interval = tokio::time::interval(SAMPLE_INTERVAL);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        let mut previous = None;
-        let mut pruned_day = None;
+        let mut previous: Option<Arc<Sample>> = None;
+        let mut cursor = None;
+        let mut last_saved_minute: Option<i64> = None;
+        let mut capture_failed = false;
         loop {
             interval.tick().await;
             if Handle::global().is_exiting() {
-                previous = None;
-                continue;
+                return;
             }
 
-            let Ok(Ok(snapshot)) = tokio::time::timeout(SAMPLE_TIMEOUT, Handle::mihomo().get_connections()).await
-            else {
-                previous = None;
+            let Ok(Ok(capture)) = tokio::time::timeout(SAMPLE_TIMEOUT, capture::read(cursor.as_ref())).await else {
+                capture_failed = true;
+                if cursor.is_none() {
+                    previous = None;
+                }
                 continue;
             };
-            let minute = current_minute();
+            let baseline = previous
+                .as_ref()
+                .filter(|_| capture::should_continue(cursor.as_ref(), capture.cursor.as_ref()))
+                .cloned();
+            let capture::Capture {
+                connections,
+                cursor: next_cursor,
+                closed,
+                dropped,
+            } = capture;
+            let sampled_at = Utc::now().timestamp();
+            let minute = floor_minute(sampled_at);
+            let interrupted = capture_failed
+                || dropped > 0
+                || previous.as_ref().is_some_and(|previous| {
+                    baseline.is_none() || sampled_at.saturating_sub(previous.sampled_at) > SAMPLE_GAP_SECONDS
+                });
             let day = minute.div_euclid(86_400);
-            let cutoff = (pruned_day != Some(day)).then(|| store::retention_cutoff(minute));
+            let cutoff = (last_saved_minute.map(|saved| saved.div_euclid(86_400)) != Some(day))
+                .then(|| store::retention_cutoff(minute));
             let finished = AsyncHandler::spawn_blocking(move || {
-                let (sample, buckets) = Sampler::default().measure(snapshot, previous.as_ref());
-                if !buckets.is_empty() {
-                    let mut database = store::open(&database_path()?)?;
-                    store::save(&mut database, minute, &buckets, cutoff)?;
+                let (sample, buckets, backfill) = Sampler {
+                    sampled_at,
+                    ..Sampler::default()
                 }
-                Ok::<_, anyhow::Error>((sample, !buckets.is_empty()))
+                .measure(connections, baseline.as_deref(), closed);
+                let interrupted = interrupted || (baseline.is_some() && buckets.is_empty());
+                let save = interrupted
+                    || last_saved_minute != Some(minute)
+                    || !backfill.is_empty()
+                    || buckets.values().any(|amount| !amount.is_empty());
+                if save {
+                    let mut database = store::open(&database_path()?)?;
+                    store::save_sample(&mut database, sampled_at, &buckets, backfill, cutoff, interrupted)?;
+                }
+                Ok::<_, anyhow::Error>((sample, save))
             })
             .await;
             match finished {
                 Ok(Ok((sample, saved))) => {
-                    previous = Some(sample);
+                    previous = Some(Arc::new(sample));
+                    cursor = next_cursor;
+                    capture_failed = false;
                     if saved {
-                        pruned_day = Some(day);
+                        last_saved_minute = Some(minute);
                     }
                 }
                 Ok(Err(error)) => {
+                    capture_failed = true;
                     logging!(warn, Type::File, "Traffic history sample could not be saved: {error:#}");
-                    previous = None;
+                    if cursor.is_none() {
+                        previous = None;
+                    }
                 }
                 Err(error) => {
+                    capture_failed = true;
                     logging!(warn, Type::File, "Traffic history sample task failed: {error:#}");
-                    previous = None;
+                    if cursor.is_none() {
+                        previous = None;
+                    }
                 }
             }
         }
@@ -328,7 +457,7 @@ pub(crate) async fn read_summary(
 
 #[cfg(test)]
 mod tests {
-    use super::{Bucket, Sampler};
+    use super::{Bucket, ClosedTraffic, Sampler, TrafficDimension, TrafficRoute, store};
     use tauri_plugin_mihomo::models::{Connection, ConnectionMetaData, Connections};
 
     fn snapshot(total: u64, proxy: u64, direct: u64) -> Connections {
@@ -354,9 +483,9 @@ mod tests {
 
     #[test]
     fn sampler_distinguishes_route_deltas_and_does_not_count_core_reset_as_traffic() {
-        let (previous, baseline) = Sampler::default().measure(snapshot(100, 20, 30), None);
+        let (previous, baseline, _) = Sampler::default().measure(snapshot(100, 20, 30), None, Vec::new());
         assert!(baseline.is_empty());
-        let (current, buckets) = Sampler::default().measure(snapshot(150, 30, 55), Some(&previous));
+        let (current, buckets, _) = Sampler::default().measure(snapshot(150, 30, 55), Some(&previous), Vec::new());
         let download = |scope| {
             buckets
                 .iter()
@@ -374,7 +503,98 @@ mod tests {
                 .download,
             15
         );
-        let (_, after_reset) = Sampler::default().measure(snapshot(25, 12, 8), Some(&current));
+        let (_, after_reset, _) = Sampler::default().measure(snapshot(25, 12, 8), Some(&current), Vec::new());
         assert!(after_reset.is_empty());
+    }
+
+    #[test]
+    fn records_between_sample_closures_and_only_new_bytes_for_previously_active_connections() {
+        let (previous, _, _) = Sampler::default().measure(snapshot(100, 20, 30), None, Vec::new());
+        let closure = |id: &str, process: &str, download, increment| ClosedTraffic {
+            id: id.to_owned(),
+            process: process.to_owned(),
+            destination: "example.test".to_owned(),
+            node: "Node".to_owned(),
+            upload: 0,
+            download,
+            increment,
+            recorded_at: 0,
+        };
+        let (_, buckets, _) = Sampler::default().measure(
+            Connections {
+                download_total: 155,
+                ..Connections::default()
+            },
+            Some(&previous),
+            vec![
+                closure("proxy", "", 30, false),
+                closure("proxy", "", 5, true),
+                closure("short", "short.exe", 40, false),
+            ],
+        );
+        let bytes = |process: &str| {
+            buckets
+                .iter()
+                .find(|(bucket, _)| bucket.scope == "proxy" && bucket.process.eq_ignore_ascii_case(process))
+                .map(|(_, amount)| amount.download)
+        };
+        assert_eq!(bytes("example.exe"), Some(15));
+        assert_eq!(bytes("short.exe"), Some(40));
+        assert!(
+            buckets[&Bucket {
+                scope: "unattributed",
+                ..Bucket::default()
+            }]
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn saves_recovered_closed_bytes_in_the_event_minute_without_marking_it_sampled() -> anyhow::Result<()> {
+        let mut database = store::open(std::path::Path::new(":memory:"))?;
+        let sample_at = |sampled_at| Sampler {
+            sampled_at,
+            ..Sampler::default()
+        };
+        let (baseline, starting_buckets, no_backfill) = sample_at(50).measure(snapshot(100, 20, 30), None, vec![]);
+        store::save_sample(&mut database, 50, &starting_buckets, no_backfill, None, false)?;
+
+        let (_, buckets, backfill) = sample_at(130).measure(
+            Connections {
+                download_total: 164,
+                ..Connections::default()
+            },
+            Some(&baseline),
+            vec![ClosedTraffic {
+                id: "proxy".to_owned(),
+                process: String::new(),
+                destination: "example.test".to_owned(),
+                node: "Node".to_owned(),
+                upload: 0,
+                download: 76,
+                increment: false,
+                recorded_at: 70,
+            }],
+        );
+        store::save_sample(&mut database, 130, &buckets, backfill, None, true)?;
+        store::save_sample(&mut database, 145, &Default::default(), Default::default(), None, false)?;
+
+        let result = store::summary(
+            &database,
+            0,
+            180,
+            TrafficRoute::Proxy,
+            TrafficDimension::Application,
+            None,
+        )?;
+        assert_eq!(result.capture_minutes, [0, 120]);
+        assert_eq!(result.interrupted_minutes, [120]);
+        assert_eq!(result.last_sample_at, Some(145));
+        assert_eq!(result.core_amount.download, 64);
+        assert_eq!(result.amount.download, 56);
+        assert_eq!(result.unattributed.download, 8);
+        assert_eq!(result.points[0].minute, 60);
+        assert_eq!(result.unknown_application.download, 0);
+        Ok(())
     }
 }

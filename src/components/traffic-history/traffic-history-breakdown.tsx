@@ -15,12 +15,19 @@ import {
   ToggleButtonGroup,
   Typography,
 } from '@mui/material'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { Button as ShadcnButton } from '@/components/ui/button'
 import type { TrafficBreakdown, TrafficDimension } from '@/services/bindings'
 
 import { TrafficHistoryShare } from './traffic-history-share'
-import { formatTraffic } from './traffic-value'
+import {
+  formatTraffic,
+  formatTrafficCost,
+  formatTrafficPeriod,
+  type TrafficPeriod,
+} from './traffic-value'
 
 const dimensions = {
   application: 'connections.history.application',
@@ -35,19 +42,34 @@ export interface TrafficGrouping {
 
 interface Props {
   rows: TrafficBreakdown[]
+  costRows: TrafficBreakdown[]
   total: number
   grouping: TrafficGrouping
   onGroupingChange: (grouping: TrafficGrouping) => void
+  onClearApplication: () => void
+  focusedPeriod: TrafficPeriod | null
 }
 
 export function TrafficHistoryBreakdown({
   rows,
+  costRows,
   total,
   grouping,
   onGroupingChange,
+  onClearApplication,
+  focusedPeriod,
 }: Props) {
   const { t } = useTranslation()
   const { dimension, application } = grouping
+  const [sortByCost, setSortByCost] = useState(false)
+  const hasCosts = costRows.length > 0
+  const costSorted = hasCosts && sortByCost
+  const rankedRows = costSorted ? costRows : rows
+  const unknownLabel = t(
+    dimension === 'application'
+      ? 'connections.history.unknownApplication'
+      : 'connections.history.unknown',
+  )
 
   return (
     <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden' }}>
@@ -62,9 +84,31 @@ export function TrafficHistoryBreakdown({
           justifyContent: 'space-between',
         }}
       >
-        <Typography component="h2" variant="subtitle1" sx={{ fontWeight: 700 }}>
-          {t('connections.history.breakdown')}
-        </Typography>
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <Typography
+            component="h2"
+            variant="subtitle1"
+            sx={{ fontWeight: 700, overflowWrap: 'anywhere' }}
+          >
+            {application === null
+              ? t('connections.history.breakdown')
+              : application || t('connections.history.unknownApplication')}
+          </Typography>
+          {focusedPeriod && (
+            <span className="text-xs text-muted-foreground">
+              {formatTrafficPeriod(focusedPeriod)}
+            </span>
+          )}
+          {application !== null && (
+            <ShadcnButton
+              variant="outline"
+              size="sm"
+              onClick={onClearApplication}
+            >
+              {t('connections.history.backToApplications')}
+            </ShadcnButton>
+          )}
+        </div>
         <ToggleButtonGroup
           size="small"
           exclusive
@@ -103,11 +147,15 @@ export function TrafficHistoryBreakdown({
           <TableContainer>
             <Table
               size="small"
-              sx={{ tableLayout: 'fixed', '& .MuiTableCell-root': { px: 1.5 } }}
+              sx={{
+                tableLayout: 'fixed',
+                minWidth: hasCosts ? 405 : undefined,
+                '& .MuiTableCell-root': { px: 1.5 },
+              }}
             >
               <TableHead sx={{ bgcolor: 'action.hover' }}>
                 <TableRow>
-                  <TableCell sx={{ width: '45%' }}>
+                  <TableCell sx={{ width: hasCosts ? '30%' : '45%' }}>
                     {t(dimensions[dimension])}
                   </TableCell>
                   <TableCell align="right">
@@ -116,15 +164,48 @@ export function TrafficHistoryBreakdown({
                   <TableCell align="right">
                     {t('connections.history.download')}
                   </TableCell>
-                  <TableCell align="right">
-                    {t('connections.history.total')}
+                  <TableCell
+                    align="right"
+                    sortDirection={hasCosts && !costSorted ? 'desc' : false}
+                  >
+                    {hasCosts ? (
+                      <ShadcnButton
+                        size="sm"
+                        variant="ghost"
+                        className="h-auto p-0 text-xs"
+                        aria-pressed={!costSorted}
+                        onClick={() => setSortByCost(false)}
+                      >
+                        {t('connections.history.total')}
+                        {!costSorted && <span aria-hidden="true">↓</span>}
+                      </ShadcnButton>
+                    ) : (
+                      t('connections.history.total')
+                    )}
                   </TableCell>
+                  {hasCosts && (
+                    <TableCell
+                      align="right"
+                      sortDirection={costSorted ? 'desc' : false}
+                    >
+                      <ShadcnButton
+                        size="sm"
+                        variant="ghost"
+                        className="h-auto whitespace-normal p-0 text-xs"
+                        aria-pressed={costSorted}
+                        onClick={() => setSortByCost(true)}
+                      >
+                        {t('connections.history.estimatedCost')}
+                        {costSorted && <span aria-hidden="true">↓</span>}
+                      </ShadcnButton>
+                    </TableCell>
+                  )}
                 </TableRow>
               </TableHead>
               <TableBody sx={{ '& tr:last-child td': { borderBottom: 0 } }}>
-                {rows.map((row) => {
+                {rankedRows.map((row) => {
                   const amount = row.upload + row.download
-                  const name = row.name || t('connections.history.unknown')
+                  const name = row.name || unknownLabel
                   return (
                     <TableRow
                       hover
@@ -178,13 +259,31 @@ export function TrafficHistoryBreakdown({
                           }}
                         />
                       </TableCell>
+                      {hasCosts && (
+                        <TableCell align="right">
+                          {row.estimatedCost === null
+                            ? null
+                            : formatTrafficCost(row.estimatedCost)}
+                          {row.partialCost && (
+                            <div className="text-xs text-muted-foreground">
+                              {t('connections.history.partialCost')}
+                            </div>
+                          )}
+                        </TableCell>
+                      )}
                     </TableRow>
                   )
                 })}
               </TableBody>
             </Table>
           </TableContainer>
-          {total > 0 && <TrafficHistoryShare rows={rows} total={total} />}
+          {total > 0 && (
+            <TrafficHistoryShare
+              rows={rows}
+              total={total}
+              unknownLabel={unknownLabel}
+            />
+          )}
         </Box>
       )}
     </Paper>

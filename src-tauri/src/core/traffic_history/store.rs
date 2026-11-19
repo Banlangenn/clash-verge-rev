@@ -1,4 +1,7 @@
-use super::{Bucket, TrafficAmount, TrafficBreakdown, TrafficDimension, TrafficPoint, TrafficRoute, TrafficSummary};
+use super::{
+    Bucket, TrafficAmount, TrafficBreakdown, TrafficBuckets, TrafficDimension, TrafficPoint, TrafficRoute,
+    TrafficSummary, floor_minute,
+};
 #[cfg(any(windows, test))]
 use anyhow::ensure;
 use anyhow::{Context as _, Result};
@@ -8,7 +11,10 @@ use chrono::{DateTime, NaiveDate};
 use rusqlite::{Connection, Transaction, params};
 #[cfg(any(windows, test))]
 use serde::Deserialize;
-use std::path::Path;
+use std::{
+    collections::{BTreeMap, HashMap},
+    path::Path,
+};
 #[cfg(any(windows, test))]
 use std::{fs, io};
 
@@ -41,7 +47,12 @@ pub(super) fn open(path: &Path) -> Result<Connection> {
             PRIMARY KEY (minute, scope, process, destination, node)
          ) WITHOUT ROWID;
          CREATE INDEX IF NOT EXISTS traffic_core_minutes ON traffic (minute) WHERE scope = 'core';
-         CREATE TABLE IF NOT EXISTS traffic_migrations (name TEXT PRIMARY KEY) WITHOUT ROWID;",
+         CREATE TABLE IF NOT EXISTS traffic_migrations (name TEXT PRIMARY KEY) WITHOUT ROWID;
+         CREATE TABLE IF NOT EXISTS traffic_capture (
+            minute INTEGER PRIMARY KEY,
+            sampled_at INTEGER NOT NULL,
+            interrupted INTEGER NOT NULL
+         );",
     )?;
     Ok(database)
 }
@@ -65,19 +76,35 @@ fn add(transaction: &Transaction<'_>, minute: i64, bucket: &Bucket, amount: Traf
     Ok(())
 }
 
-pub(super) fn save(
+pub(super) fn save_sample(
     database: &mut Connection,
-    minute: i64,
-    buckets: &std::collections::HashMap<Bucket, TrafficAmount>,
+    sampled_at: i64,
+    buckets: &TrafficBuckets,
+    backfill: BTreeMap<i64, TrafficBuckets>,
     cutoff: Option<i64>,
+    interrupted: bool,
 ) -> Result<()> {
+    let minute = floor_minute(sampled_at);
     let transaction = database.transaction()?;
     if let Some(cutoff) = cutoff {
         transaction.execute("DELETE FROM traffic WHERE minute < ?1", [cutoff])?;
+        transaction.execute("DELETE FROM traffic_capture WHERE minute < ?1", [cutoff])?;
+    }
+    for (event_minute, amounts) in backfill {
+        for (bucket, amount) in amounts {
+            add(&transaction, event_minute, &bucket, amount)?;
+        }
     }
     for (bucket, amount) in buckets {
         add(&transaction, minute, bucket, *amount)?;
     }
+    transaction.execute(
+        "INSERT INTO traffic_capture (minute, sampled_at, interrupted) VALUES (?1, ?2, ?3)
+         ON CONFLICT DO UPDATE SET
+           sampled_at = max(sampled_at, excluded.sampled_at),
+           interrupted = max(interrupted, excluded.interrupted)",
+        params![minute, sampled_at, interrupted],
+    )?;
     transaction.commit()?;
     Ok(())
 }
@@ -185,6 +212,13 @@ fn node_unit_price(node: &str) -> Option<f64> {
     price.parse::<f64>().ok().filter(|price| price.is_finite())
 }
 
+fn estimate_cost(scope: &str, node: &str, upload: u64, download: u64) -> Option<f64> {
+    if scope != "proxy" {
+        return None;
+    }
+    node_unit_price(node).map(|price| ((upload as f64 + download as f64) / BYTES_PER_GIBIBYTE) * price)
+}
+
 pub(super) fn summary(
     database: &Connection,
     from: i64,
@@ -203,14 +237,34 @@ pub(super) fn summary(
         TrafficDimension::Destination => "destination",
         TrafficDimension::Node => "node",
     };
-    let bounds = transaction.query_row(
+    let bounds: (Option<i64>, Option<i64>) = transaction.query_row(
         "SELECT min(minute), max(minute) FROM traffic WHERE scope = 'core'",
         [],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
-    let (sampled_minutes, core_amount, unattributed) = transaction.query_row(
-        "SELECT count(CASE WHEN scope = 'core' THEN 1 END),
-                coalesce(sum(CASE WHEN scope = 'core' THEN upload END), 0),
+    let (first_capture, last_sample_at): (Option<i64>, Option<i64>) =
+        transaction.query_row("SELECT min(minute), max(sampled_at) FROM traffic_capture", [], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
+    let mut capture_query = transaction.prepare(
+        "SELECT minute, interrupted FROM traffic_capture WHERE minute >= ?1 AND minute < ?2
+         UNION ALL
+         SELECT minute, 0 FROM traffic
+          WHERE scope = 'core' AND minute >= ?1 AND minute < ?2 AND minute < ?3
+         ORDER BY minute",
+    )?;
+    let mut capture_minutes = Vec::new();
+    let mut interrupted_minutes = Vec::new();
+    let mut capture_rows = capture_query.query(params![from, until, first_capture.unwrap_or(i64::MAX)])?;
+    while let Some(row) = capture_rows.next()? {
+        let minute = row.get(0)?;
+        capture_minutes.push(minute);
+        if row.get::<_, bool>(1)? {
+            interrupted_minutes.push(minute);
+        }
+    }
+    let (core_amount, unattributed) = transaction.query_row(
+        "SELECT coalesce(sum(CASE WHEN scope = 'core' THEN upload END), 0),
                 coalesce(sum(CASE WHEN scope = 'core' THEN download END), 0),
                 coalesce(sum(CASE WHEN scope = 'unattributed' THEN upload END), 0),
                 coalesce(sum(CASE WHEN scope = 'unattributed' THEN download END), 0)
@@ -218,14 +272,13 @@ pub(super) fn summary(
         params![from, until],
         |row| {
             Ok((
-                row.get(0)?,
                 TrafficAmount {
-                    upload: row.get(1)?,
-                    download: row.get(2)?,
+                    upload: row.get(0)?,
+                    download: row.get(1)?,
                 },
                 TrafficAmount {
-                    upload: row.get(3)?,
-                    download: row.get(4)?,
+                    upload: row.get(2)?,
+                    download: row.get(3)?,
                 },
             ))
         },
@@ -233,6 +286,16 @@ pub(super) fn summary(
 
     let bindings = params![from, until, scope, process];
     let range = "FROM traffic WHERE minute >= ?1 AND minute < ?2 AND scope = ?3 AND (?4 IS NULL OR process = ?4)";
+    let unknown_application = transaction.query_row(
+        &format!("SELECT coalesce(sum(upload), 0), coalesce(sum(download), 0) {range} AND process = ''"),
+        bindings,
+        |row| {
+            Ok(TrafficAmount {
+                upload: row.get(0)?,
+                download: row.get(1)?,
+            })
+        },
+    )?;
     let mut points_query = transaction.prepare(&format!(
         "SELECT minute, node, sum(upload), sum(download) {range} GROUP BY minute, node ORDER BY minute"
     ))?;
@@ -254,10 +317,7 @@ pub(super) fn summary(
         point.upload += upload;
         point.download += download;
 
-        if scope == "proxy"
-            && let Some(price) = node_unit_price(row.get_ref(1)?.as_str()?)
-        {
-            let cost = ((upload as f64 + download as f64) / BYTES_PER_GIBIBYTE) * price;
+        if let Some(cost) = estimate_cost(scope, row.get_ref(1)?.as_str()?, upload, download) {
             *point.estimated_cost.get_or_insert(0.0) += cost;
         }
     }
@@ -271,29 +331,68 @@ pub(super) fn summary(
         .filter_map(|point| point.estimated_cost)
         .reduce(|a, b| a + b);
     let mut breakdown_query = transaction.prepare(&format!(
-        "SELECT {column}, sum(upload), sum(download) {range}
-         GROUP BY {column} ORDER BY sum(upload) + sum(download) DESC, {column} LIMIT 100"
+        "SELECT {column}, node, sum(upload), sum(download) {range} GROUP BY {column}, node"
     ))?;
-    let breakdown = breakdown_query
-        .query_map(bindings, |row| {
-            Ok(TrafficBreakdown {
-                name: row.get(0)?,
-                upload: row.get(1)?,
-                download: row.get(2)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut breakdown_rows = breakdown_query.query(bindings)?;
+    let mut groups = HashMap::<String, TrafficBreakdown>::new();
+    while let Some(row) = breakdown_rows.next()? {
+        let name: String = row.get(0)?;
+        let group = groups.entry(name.clone()).or_insert_with(|| TrafficBreakdown {
+            name,
+            upload: 0,
+            download: 0,
+            estimated_cost: None,
+            partial_cost: false,
+        });
+        let upload: u64 = row.get(2)?;
+        let download: u64 = row.get(3)?;
+        group.upload += upload;
+        group.download += download;
+        if let Some(cost) = estimate_cost(scope, row.get_ref(1)?.as_str()?, upload, download) {
+            *group.estimated_cost.get_or_insert(0.0) += cost;
+        } else if upload > 0 || download > 0 {
+            group.partial_cost = true;
+        }
+    }
+    let mut breakdown: Vec<_> = groups.into_values().collect();
+    for group in &mut breakdown {
+        group.partial_cost &= group.estimated_cost.is_some();
+    }
+    let mut cost_breakdown: Vec<_> = breakdown
+        .iter()
+        .filter(|row| row.estimated_cost.is_some())
+        .cloned()
+        .collect();
+    cost_breakdown.sort_unstable_by(|left, right| {
+        right
+            .estimated_cost
+            .unwrap_or_default()
+            .total_cmp(&left.estimated_cost.unwrap_or_default())
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    cost_breakdown.truncate(100);
+    breakdown.sort_unstable_by(|left, right| {
+        (right.upload + right.download)
+            .cmp(&(left.upload + left.download))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    breakdown.truncate(100);
 
     Ok(TrafficSummary {
-        first_minute: bounds.0,
-        last_minute: bounds.1,
-        sampled_minutes,
+        first_minute: bounds.0.into_iter().chain(first_capture).min(),
+        last_minute: bounds.1.into_iter().chain(last_sample_at.map(floor_minute)).max(),
+        sampled_minutes: capture_minutes.len() as u64,
+        capture_minutes,
+        interrupted_minutes,
+        last_sample_at: last_sample_at.or(bounds.1),
         core_amount,
         unattributed,
+        unknown_application,
         amount,
         estimated_cost,
         points,
         breakdown,
+        cost_breakdown,
     })
 }
 
@@ -303,9 +402,18 @@ pub(super) fn retention_cutoff(minute: i64) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{migrate, open, save, summary};
+    use super::{migrate, open, save_sample, summary};
     use crate::core::traffic_history::{Bucket, TrafficAmount, TrafficDimension, TrafficRoute};
     use std::{collections::HashMap, fs};
+
+    fn save(
+        database: &mut rusqlite::Connection,
+        minute: i64,
+        buckets: &HashMap<Bucket, TrafficAmount>,
+        cutoff: Option<i64>,
+    ) -> anyhow::Result<()> {
+        save_sample(database, minute, buckets, Default::default(), cutoff, false)
+    }
 
     #[test]
     fn estimates_only_priced_proxy_traffic_in_the_requested_range() -> anyhow::Result<()> {
@@ -349,6 +457,10 @@ mod tests {
             Some("browser.exe"),
         )?;
         assert_eq!(filtered.estimated_cost, Some(0.35));
+        assert_eq!(filtered.cost_breakdown[0].estimated_cost, Some(0.35));
+        assert!(filtered.cost_breakdown[0].partial_cost);
+        assert_eq!(result.cost_breakdown.len(), 3);
+        assert_eq!(result.cost_breakdown[2].estimated_cost, Some(0.0));
 
         let direct = summary(
             &database,
@@ -360,6 +472,7 @@ mod tests {
         )?;
         assert_eq!(direct.amount.download, traffic.download);
         assert_eq!(direct.estimated_cost, None);
+        assert!(direct.cost_breakdown.is_empty());
         assert_eq!(direct.points[0].estimated_cost, None);
         Ok(())
     }

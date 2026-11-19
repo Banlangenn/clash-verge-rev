@@ -9,26 +9,24 @@ import {
 } from '@/components/ui/chart'
 import type { TrafficBreakdown } from '@/services/bindings'
 
-import { formatTraffic } from './traffic-value'
+import { formatTraffic, formatTrafficShare } from './traffic-value'
+
+const lightColors = ['#2563eb', '#00815e', '#bd630c', '#ba3b74', '#7044b6']
+const darkColors = ['#82acff', '#54d6a7', '#ffbc66', '#f58fba', '#c2a6ff']
 
 interface Props {
   rows: TrafficBreakdown[]
   total: number
+  unknownLabel: string
 }
 
-export function TrafficHistoryShare({ rows, total }: Props) {
+export function TrafficHistoryShare({ rows, total, unknownLabel }: Props) {
   const { t } = useTranslation()
   const { palette } = useTheme()
-  const colors = [
-    palette.primary.main,
-    palette.secondary.main,
-    palette.info.main,
-    palette.success.main,
-    palette.warning.main,
-  ]
+  const colors = palette.mode === 'dark' ? darkColors : lightColors
   const top = rows.slice(0, colors.length).map((row, index) => ({
     id: index,
-    label: row.name || t('connections.history.unknown'),
+    label: row.name || unknownLabel,
     value: row.upload + row.download,
     fill: colors[index],
   }))
@@ -41,15 +39,11 @@ export function TrafficHistoryShare({ rows, total }: Props) {
             id: colors.length,
             label: t('connections.history.other'),
             value: remaining,
-            fill: palette.text.disabled,
+            fill: palette.mode === 'dark' ? '#a1a1aa' : '#6b7280',
           },
         ]
       : top
-  const percent = new Intl.NumberFormat(undefined, {
-    style: 'percent',
-    maximumFractionDigits: 1,
-  })
-  const formatShare = (value: number) => percent.format(value / total)
+  const formatShare = (value: number) => formatTrafficShare(value / total)
 
   return (
     <section className="min-w-0 border-t border-border px-3 pt-3 pb-3.5 md:border-t-0 md:border-l">

@@ -1,0 +1,456 @@
+diff --git a/hub/route/connections.go b/hub/route/connections.go
+index ddfa6c58f861ad614d59f73b932683b9453134da..7642a24bfadd2eab53e7ecf96e84f3640187ade1 100644
+--- a/hub/route/connections.go
++++ b/hub/route/connections.go
+@@ -18,0 +19 @@ func connectionRouter() http.Handler {
++	r.Get("/history", getTrafficHistory)
+@@ -23,0 +25,15 @@ func connectionRouter() http.Handler {
++func getTrafficHistory(w http.ResponseWriter, r *http.Request) {
++	query := r.URL.Query()
++	var after uint64
++	if raw := query.Get("after"); raw != "" {
++		var err error
++		after, err = strconv.ParseUint(raw, 10, 64)
++		if err != nil {
++			render.Status(r, http.StatusBadRequest)
++			render.JSON(w, r, ErrBadRequest)
++			return
++		}
++	}
++	render.JSON(w, r, statistic.DefaultManager.TrafficHistory(query.Get("session"), after))
++}
++
+diff --git a/tunnel/statistic/manager.go b/tunnel/statistic/manager.go
+index c69746dbcbac1d8fb1cc7f22e7bd538a3e62385c..ca442dc313ae720e33d42edf6ba47694e5bd8042 100644
+--- a/tunnel/statistic/manager.go
++++ b/tunnel/statistic/manager.go
+@@ -29,0 +30 @@ type Manager struct {
++	history       trafficJournal
+@@ -40,0 +42,11 @@ func (m *Manager) Join(c Tracker) {
++	info := c.Info()
++	if info.accounted {
++		m.history.mutex.Lock()
++		defer m.history.mutex.Unlock()
++		if upload := info.UploadTotal.Load(); upload > 0 {
++			m.PushUploaded(upload)
++		}
++		if download := info.DownloadTotal.Load(); download > 0 {
++			m.PushDownloaded(download)
++		}
++	}
+@@ -44,0 +57,12 @@ func (m *Manager) Leave(c Tracker) {
++	info := c.Info()
++	if !info.accounted {
++		m.connections.Delete(c.ID())
++		return
++	}
++
++	m.history.mutex.Lock()
++	defer m.history.mutex.Unlock()
++	if info.closed {
++		return
++	}
++	info.closed = true
+@@ -45,0 +70 @@ func (m *Manager) Leave(c Tracker) {
++	m.history.append(info, info.UploadTotal.Load(), info.DownloadTotal.Load(), false)
+diff --git a/tunnel/statistic/tracker.go b/tunnel/statistic/tracker.go
+index 2fbb1cf9e350605e47c2ebf478ac6ab0f4ebf472..71963b814421b4ee370724974833c2760a75e310 100644
+--- a/tunnel/statistic/tracker.go
++++ b/tunnel/statistic/tracker.go
+@@ -33,0 +34,3 @@ type TrackerInfo struct {
++
++	accounted bool
++	closed    bool
+@@ -40,2 +42,0 @@ type tcpTracker struct {
+-
+-	pushToManager bool `json:"-"`
+@@ -55,4 +56 @@ func (tt *tcpTracker) Read(b []byte) (int, error) {
+-	if tt.pushToManager {
+-		tt.manager.PushDownloaded(download)
+-	}
+-	tt.DownloadTotal.Add(download)
++	tt.TrackerInfo.account(tt.manager, download, false)
+@@ -65,4 +63 @@ func (tt *tcpTracker) ReadBuffer(buffer *buf.Buffer) (err error) {
+-	if tt.pushToManager {
+-		tt.manager.PushDownloaded(download)
+-	}
+-	tt.DownloadTotal.Add(download)
++	tt.TrackerInfo.account(tt.manager, download, false)
+@@ -74,4 +69 @@ func (tt *tcpTracker) UnwrapReader() (io.Reader, []N.CountFunc) {
+-		if tt.pushToManager {
+-			tt.manager.PushDownloaded(download)
+-		}
+-		tt.DownloadTotal.Add(download)
++		tt.TrackerInfo.account(tt.manager, download, false)
+@@ -84,4 +76 @@ func (tt *tcpTracker) Write(b []byte) (int, error) {
+-	if tt.pushToManager {
+-		tt.manager.PushUploaded(upload)
+-	}
+-	tt.UploadTotal.Add(upload)
++	tt.TrackerInfo.account(tt.manager, upload, true)
+@@ -94,4 +83 @@ func (tt *tcpTracker) WriteBuffer(buffer *buf.Buffer) (err error) {
+-	if tt.pushToManager {
+-		tt.manager.PushUploaded(upload)
+-	}
+-	tt.UploadTotal.Add(upload)
++	tt.TrackerInfo.account(tt.manager, upload, true)
+@@ -103,4 +89 @@ func (tt *tcpTracker) UnwrapWriter() (io.Writer, []N.CountFunc) {
+-		if tt.pushToManager {
+-			tt.manager.PushUploaded(upload)
+-		}
+-		tt.UploadTotal.Add(upload)
++		tt.TrackerInfo.account(tt.manager, upload, true)
+@@ -133,0 +117 @@ func NewTCPTracker(conn C.Conn, manager *Manager, metadata *C.Metadata, rule C.R
++			accounted:     pushToManager,
+@@ -135,10 +118,0 @@ func NewTCPTracker(conn C.Conn, manager *Manager, metadata *C.Metadata, rule C.R
+-		pushToManager: pushToManager,
+-	}
+-
+-	if pushToManager {
+-		if uploadTotal > 0 {
+-			manager.PushUploaded(uploadTotal)
+-		}
+-		if downloadTotal > 0 {
+-			manager.PushDownloaded(downloadTotal)
+-		}
+@@ -160,2 +133,0 @@ type udpTracker struct {
+-
+-	pushToManager bool `json:"-"`
+@@ -175,4 +147 @@ func (ut *udpTracker) ReadFrom(b []byte) (int, net.Addr, error) {
+-	if ut.pushToManager {
+-		ut.manager.PushDownloaded(download)
+-	}
+-	ut.DownloadTotal.Add(download)
++	ut.TrackerInfo.account(ut.manager, download, false)
+@@ -185,4 +154 @@ func (ut *udpTracker) WaitReadFrom() (data []byte, put func(), addr net.Addr, er
+-	if ut.pushToManager {
+-		ut.manager.PushDownloaded(download)
+-	}
+-	ut.DownloadTotal.Add(download)
++	ut.TrackerInfo.account(ut.manager, download, false)
+@@ -195,4 +161 @@ func (ut *udpTracker) WriteTo(b []byte, addr net.Addr) (int, error) {
+-	if ut.pushToManager {
+-		ut.manager.PushUploaded(upload)
+-	}
+-	ut.UploadTotal.Add(upload)
++	ut.TrackerInfo.account(ut.manager, upload, true)
+@@ -225,0 +189 @@ func NewUDPTracker(conn C.PacketConn, manager *Manager, metadata *C.Metadata, ru
++			accounted:     pushToManager,
+@@ -227,10 +190,0 @@ func NewUDPTracker(conn C.PacketConn, manager *Manager, metadata *C.Metadata, ru
+-		pushToManager: pushToManager,
+-	}
+-
+-	if pushToManager {
+-		if uploadTotal > 0 {
+-			manager.PushUploaded(uploadTotal)
+-		}
+-		if downloadTotal > 0 {
+-			manager.PushDownloaded(downloadTotal)
+-		}
+diff --git a/tunnel/statistic/traffic_history.go b/tunnel/statistic/traffic_history.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..bf580e9c330d4ea0d268bef244d683781ad13599
+--- /dev/null
++++ b/tunnel/statistic/traffic_history.go
+@@ -0,0 +1,169 @@
++package statistic
++
++import (
++	"sync"
++	"sync/atomic"
++	"time"
++
++	"github.com/metacubex/mihomo/common/utils"
++)
++
++const trafficJournalCapacity = 4096
++
++type closedTraffic struct {
++	ID          string `json:"id"`
++	Process     string `json:"process"`
++	Destination string `json:"destination"`
++	Node        string `json:"node"`
++	Upload      int64  `json:"upload"`
++	Download    int64  `json:"download"`
++	Increment   bool   `json:"increment"`
++	RecordedAt  int64  `json:"recordedAt"`
++}
++
++type trafficJournal struct {
++	enabled atomic.Bool
++	mutex   sync.RWMutex
++	session string
++	cursor  uint64
++	records [trafficJournalCapacity]closedTraffic
++}
++
++// Called with the journal locked. Closure accounting is serialized per tracker,
++// including bytes delivered by an in-flight operation after Leave.
++func (j *trafficJournal) append(info *TrackerInfo, upload, download int64, increment bool) {
++	if upload == 0 && download == 0 {
++		return
++	}
++	record := closedTraffic{
++		ID:         info.UUID.String(),
++		Upload:     upload,
++		Download:   download,
++		Increment:  increment,
++		RecordedAt: time.Now().Unix(),
++	}
++	if metadata := info.Metadata; metadata != nil {
++		record.Process = metadata.Process
++		if record.Process == "" {
++			record.Process = metadata.ProcessPath
++		}
++		record.Destination = metadata.Host
++		if record.Destination == "" {
++			record.Destination = metadata.SniffHost
++		}
++		if record.Destination == "" && metadata.DstIP.IsValid() {
++			record.Destination = metadata.DstIP.String()
++		}
++	}
++	if len(info.Chain) > 0 {
++		record.Node = info.Chain[0]
++	}
++	j.records[j.cursor%trafficJournalCapacity] = record
++	j.cursor++
++}
++
++func (info *TrackerInfo) account(manager *Manager, size int64, upload bool) {
++	if size == 0 {
++		return
++	}
++	if !info.accounted {
++		info.addTraffic(manager, size, upload)
++		return
++	}
++
++	journal := &manager.history
++	journal.mutex.RLock()
++	if !info.closed {
++		info.addTraffic(manager, size, upload)
++		journal.mutex.RUnlock()
++		return
++	}
++	journal.mutex.RUnlock()
++
++	journal.mutex.Lock()
++	defer journal.mutex.Unlock()
++	info.addTraffic(manager, size, upload)
++	if upload {
++		journal.append(info, size, 0, true)
++	} else {
++		journal.append(info, 0, size, true)
++	}
++}
++
++func (info *TrackerInfo) addTraffic(manager *Manager, size int64, upload bool) {
++	if upload {
++		if info.accounted {
++			manager.PushUploaded(size)
++		}
++		info.UploadTotal.Add(size)
++		return
++	}
++	if info.accounted {
++		manager.PushDownloaded(size)
++	}
++	info.DownloadTotal.Add(size)
++}
++
++type activeTraffic struct {
++	*TrackerInfo
++	Upload   int64 `json:"upload"`
++	Download int64 `json:"download"`
++}
++
++type activeTrafficSnapshot struct {
++	UploadTotal   int64           `json:"uploadTotal"`
++	DownloadTotal int64           `json:"downloadTotal"`
++	Connections   []activeTraffic `json:"connections"`
++}
++
++type TrafficHistorySnapshot struct {
++	Snapshot activeTrafficSnapshot `json:"snapshot"`
++	Session  string                `json:"session"`
++	Cursor   uint64                `json:"cursor"`
++	Dropped  uint64                `json:"dropped"`
++	Closed   []closedTraffic       `json:"closed"`
++}
++
++func (m *Manager) TrafficHistoryEnabled() bool {
++	return m.history.enabled.Load()
++}
++
++func (m *Manager) TrafficHistory(session string, after uint64) TrafficHistorySnapshot {
++	journal := &m.history
++	journal.enabled.Store(true)
++	journal.mutex.Lock()
++	defer journal.mutex.Unlock()
++	if journal.session == "" {
++		journal.session = utils.NewUUIDV4().String()
++	}
++	snapshot := TrafficHistorySnapshot{
++		Session: journal.session,
++		Cursor:  journal.cursor,
++		Closed:  []closedTraffic{},
++	}
++	// Freeze all accounted bytes while the journal blocks concurrent counter
++	// updates and closures. Active totals and closed records share this boundary.
++	m.Range(func(c Tracker) bool {
++		info := c.Info()
++		if info.accounted {
++			snapshot.Snapshot.Connections = append(snapshot.Snapshot.Connections, activeTraffic{
++				TrackerInfo: info,
++				Upload:      info.UploadTotal.Load(),
++				Download:    info.DownloadTotal.Load(),
++			})
++		}
++		return true
++	})
++	snapshot.Snapshot.UploadTotal, snapshot.Snapshot.DownloadTotal = m.Total()
++	if session != journal.session || after > journal.cursor {
++		return snapshot
++	}
++	if journal.cursor-after > trafficJournalCapacity {
++		snapshot.Dropped = journal.cursor - after - trafficJournalCapacity
++		after = journal.cursor - trafficJournalCapacity
++	}
++	for ; after < journal.cursor; after++ {
++		snapshot.Closed = append(snapshot.Closed, journal.records[after%trafficJournalCapacity])
++	}
++	return snapshot
++}
+diff --git a/tunnel/statistic/traffic_history_test.go b/tunnel/statistic/traffic_history_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..0e5f35c298ff29b7d05a8f0c503a8a67d990b030
+--- /dev/null
++++ b/tunnel/statistic/traffic_history_test.go
+@@ -0,0 +1,116 @@
++package statistic
++
++import (
++	"testing"
++
++	"github.com/metacubex/mihomo/common/atomic"
++	"github.com/metacubex/mihomo/common/utils"
++	C "github.com/metacubex/mihomo/constant"
++)
++
++func TestTrafficHistoryIncludesFinalCountsAndLateIncrements(t *testing.T) {
++	manager := &Manager{}
++	tracker := &tcpTracker{manager: manager, TrackerInfo: &TrackerInfo{
++		UUID:      utils.NewUUIDV4(),
++		Metadata:  &C.Metadata{Host: "example.test", Process: "example.exe"},
++		Chain:     C.Chain{"Node A"},
++		accounted: true,
++	}}
++	manager.Join(tracker)
++	tracker.account(manager, 20, false)
++	if manager.TrafficHistoryEnabled() {
++		t.Fatal("process lookup should be inactive until a client asks for the history")
++	}
++	baseline := manager.TrafficHistory("", 0)
++	if !manager.TrafficHistoryEnabled() {
++		t.Fatal("process lookup should be enabled by a history client")
++	}
++	if len(baseline.Snapshot.Connections) != 1 || baseline.Snapshot.Connections[0].Download != 20 {
++		t.Fatalf("expected active snapshot with 20 bytes: %+v", baseline)
++	}
++	tracker.account(manager, 10, false)
++	manager.Leave(tracker)
++	manager.Leave(tracker)
++	tracker.account(manager, 4, true)
++	snapshot := manager.TrafficHistory(baseline.Session, baseline.Cursor)
++	if len(snapshot.Snapshot.Connections) != 0 || len(snapshot.Closed) != 2 || snapshot.Cursor != 2 {
++		t.Fatalf("expected one final record and one late increment: %+v", snapshot)
++	}
++	final, late := snapshot.Closed[0], snapshot.Closed[1]
++	if final.ID != tracker.ID() || final.Download != 30 || final.Increment ||
++		final.Process != "example.exe" || final.Destination != "example.test" || final.Node != "Node A" {
++		t.Fatalf("unexpected closure record: %+v", final)
++	}
++	if late.ID != final.ID || late.Upload != 4 || !late.Increment ||
++		final.RecordedAt <= 0 || late.RecordedAt < final.RecordedAt || snapshot.Dropped != 0 ||
++		snapshot.Snapshot.DownloadTotal != 30 || snapshot.Snapshot.UploadTotal != 4 {
++		t.Fatalf("unexpected late increment: %+v", snapshot)
++	}
++	if baseline.Snapshot.Connections[0].Download != 20 {
++		t.Fatalf("the active snapshot changed after it was returned")
++	}
++	if replay := manager.TrafficHistory(baseline.Session, baseline.Cursor); len(replay.Closed) != 2 {
++		t.Fatalf("retry lost records: %+v", replay)
++	}
++	if next := manager.TrafficHistory(snapshot.Session, snapshot.Cursor); len(next.Closed) != 0 {
++		t.Fatalf("advanced cursor should have no remaining records: %+v", next)
++	}
++	if next := manager.TrafficHistory("another core instance", 1); len(next.Closed) != 0 || next.Cursor != 2 {
++		t.Fatalf("new core session should return a fresh baseline: %+v", next)
++	}
++}
++
++func TestTrafficHistoryJournalIsBoundedAndExcludesUnaccountedConnections(t *testing.T) {
++	manager := &Manager{}
++	baseline := manager.TrafficHistory("", 0)
++	internal := &udpTracker{manager: manager, TrackerInfo: &TrackerInfo{UUID: utils.NewUUIDV4()}}
++	manager.Join(internal)
++	internal.account(manager, 23, false)
++	if snapshot := manager.TrafficHistory(baseline.Session, 0); len(snapshot.Snapshot.Connections) != 0 || snapshot.Snapshot.DownloadTotal != 0 {
++		t.Fatalf("unaccounted active bytes should not enter the history snapshot: %+v", snapshot)
++	}
++	manager.Leave(internal)
++	if snapshot := manager.TrafficHistory(baseline.Session, 0); snapshot.Cursor != 0 {
++		t.Fatalf("unaccounted closure should not produce history: %+v", snapshot)
++	}
++	for index := 1; index <= trafficJournalCapacity+2; index++ {
++		tracker := &udpTracker{manager: manager, TrackerInfo: &TrackerInfo{
++			UUID: utils.NewUUIDV4(), accounted: true,
++		}}
++		manager.Join(tracker)
++		tracker.account(manager, int64(index), false)
++		manager.Leave(tracker)
++	}
++	snapshot := manager.TrafficHistory(baseline.Session, 0)
++	if len(snapshot.Closed) != trafficJournalCapacity || snapshot.Closed[0].Download != 3 ||
++		snapshot.Closed[trafficJournalCapacity-1].Download != trafficJournalCapacity+2 || snapshot.Dropped != 2 {
++		t.Fatalf("unexpected ring retention: cursor %d, records %d", snapshot.Cursor, len(snapshot.Closed))
++	}
++}
++
++func TestTrafficHistoryTotalsMatchTheActiveSnapshotDuringAccounting(t *testing.T) {
++	manager := &Manager{}
++	tracker := &tcpTracker{manager: manager, TrackerInfo: &TrackerInfo{
++		UUID: utils.NewUUIDV4(), DownloadTotal: atomic.NewInt64(7), accounted: true,
++	}}
++	manager.Join(tracker)
++	first := manager.TrafficHistory("", 0)
++	if first.Snapshot.DownloadTotal != 7 || first.Snapshot.Connections[0].Download != 7 {
++		t.Fatalf("initial bytes should enter both counters: %+v", first)
++	}
++	done := make(chan struct{})
++	go func() {
++		defer close(done)
++		for index := 0; index < 20_000; index++ {
++			tracker.account(manager, 1, false)
++		}
++	}()
++	for index := 0; index < 500; index++ {
++		snapshot := manager.TrafficHistory(first.Session, first.Cursor)
++		if snapshot.Snapshot.DownloadTotal != snapshot.Snapshot.Connections[0].Download {
++			<-done
++			t.Fatalf("aggregate and active count came from different moments: %+v", snapshot)
++		}
++	}
++	<-done
++}
+diff --git a/tunnel/tunnel.go b/tunnel/tunnel.go
+index 86dbc14ae428ba7927dd2dc3ab52d78f0ddb1e87..f1dafa2201b8c967dfed9896b5e35dba29d5956c 100644
+--- a/tunnel/tunnel.go
++++ b/tunnel/tunnel.go
+@@ -409,0 +410,5 @@ func resolveMetadata(metadata *C.Metadata) (proxy C.Proxy, rule C.Rule, err erro
++	// Capture the origin while its socket is still present, after rule selection.
++	if err == nil && helper.FindProcess != nil && metadata.Process == "" && metadata.ProcessPath == "" &&
++		statistic.DefaultManager.TrafficHistoryEnabled() {
++		helper.FindProcess()
++	}

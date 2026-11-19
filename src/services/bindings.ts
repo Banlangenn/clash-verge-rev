@@ -1019,6 +1019,8 @@ export type TrafficBreakdown = {
   name: string
   upload: number
   download: number
+  estimatedCost: number | null
+  partialCost: boolean
 }
 
 export type TrafficDimension = 'application' | 'destination' | 'node'
@@ -1036,12 +1038,17 @@ export type TrafficSummary = {
   firstMinute: number | null
   lastMinute: number | null
   sampledMinutes: number
+  captureMinutes: number[]
+  interruptedMinutes: number[]
+  lastSampleAt: number | null
   coreAmount: TrafficAmount
   unattributed: TrafficAmount
+  unknownApplication: TrafficAmount
   amount: TrafficAmount
   estimatedCost: number | null
   points: TrafficPoint[]
   breakdown: TrafficBreakdown[]
+  costBreakdown: TrafficBreakdown[]
 }
 
 export type UnlockItem = {

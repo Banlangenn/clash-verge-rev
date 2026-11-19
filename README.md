@@ -25,10 +25,10 @@ A Clash Meta GUI based on <a href="https://github.com/tauri-apps/tauri">Tauri</a
 
 本 fork 基于 Clash Verge Rev v2.5.10。
 
-- 左侧主菜单新增「流量统计」，可按日期、时段和代理或直连筛选，查看应用、目标地址及节点的流量排行和占比。
-- 堆叠柱图展示上传与下载流量，悬停可查看对应时段和用量。
-- 如果节点名称以「| 0.35」这类单价结尾，统计页会按每 GB 0.35 元估算上传与下载的费用。没有可用单价时隐藏费用。
-- Windows 版可将旧流量账本导入应用，并继续在应用内记录用量。
+- 左侧「流量统计」支持按日期、时段和代理或直连筛选。可选「最近 15 分钟」「最近 1 小时」，从流量峰值进入对应时段的应用、目标地址和节点排行，再一键返回。
+- 堆叠柱图展示上传与下载，灰色表示该时段存在采集缺口。图表下方展示选中时段用量和最近采集时间，内核总量、未捕获明细和历史覆盖范围可在「数据说明」中查看。
+- 节点名以「| 0.35」等单价结尾时，可查看按每 GB 计价的预估费用，也可按费用排序。仅部分流量能计价时会标注「部分计价」，无法计算的金额留空。
+- Windows 流量版内置自定义 Mihomo `v1.19.34-traffic.2`。它会记录采样间隔内已关闭的连接，补采时按可确认的事件时间入账。旧账本可导入应用，升级前的历史统计继续保留。
 - 订阅卡片可直接开关定时更新，并用快捷按钮选择更新间隔。
 
 ## Preview
@@ -39,7 +39,14 @@ A Clash Meta GUI based on <a href="https://github.com/tauri-apps/tauri">Tauri</a
 
 ## Install
 
-流量版提供 Windows x64 便携包。解压后先退出正在运行的 Clash Verge，再打开文件夹内的 clash-verge.exe。[下载流量版](https://github.com/Banlangenn/clash-verge-rev/releases/tag/traffic-v2.5.10.1)
+流量版提供 Windows x64 便携包。先退出正在运行的 Clash Verge，将新版解压到新的目录，再打开 `clash-verge.exe`。如果应用提示更新服务或批准内核，按提示完成后在「设置」中确认内核版本为 `v1.19.34-traffic.2`。 [下载流量版](https://github.com/Banlangenn/clash-verge-rev/releases/latest)
+
+如果想让个别域名走本机网络，可在订阅扩展脚本中将精确域名规则放在通用代理规则之前。规则模式下，以下两条规则分别让 Chrome 优化服务和 Bing 扩展使用直连。
+
+```text
+DOMAIN,optimizationguide-pa.googleapis.com,DIRECT
+DOMAIN,browserdefaults.microsoft.com,DIRECT
+```
 
 ### 上游发行版
 
@@ -107,6 +114,21 @@ existing service is used, while a previously uninstalled service remains
 uninstalled and the app starts in Sidecar mode. Use `pnpm dev:service` to
 explicitly install or update the isolated development service before launch,
 or `pnpm dev:sidecar` to force the unprivileged Sidecar workflow.
+
+### 同步上游版本
+
+在上游仓库选择 **Watch → Custom → Releases** 可订阅发版通知。收到稳定版通知后，从流量版默认分支建立临时集成分支，把下方 `vX.Y.Z` 换成新版本标签。 [上游发行版](https://github.com/clash-verge-rev/clash-verge-rev/releases) · [GitHub 通知设置](https://docs.github.com/en/subscriptions-and-notifications/get-started/configuring-notifications)
+
+如果新克隆的本地仓库尚未配置 `upstream`，先执行 `git remote add upstream https://github.com/clash-verge-rev/clash-verge-rev.git`。
+
+```powershell
+git fetch origin
+git fetch upstream tag vX.Y.Z
+git switch -c sync/upstream-vX.Y.Z origin/traffic-history-v2.5.10
+git merge vX.Y.Z
+```
+
+解决冲突后，验证流量账本、订阅更新和 Windows 构建，再将集成分支合回流量版并发版。Mihomo 升级需要单独核对补丁和连接统计。 [Mihomo 补丁及构建说明](./docs/traffic-core/README.md)
 
 ## Contributions
 

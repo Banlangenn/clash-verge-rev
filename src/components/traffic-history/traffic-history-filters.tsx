@@ -32,6 +32,11 @@ const timePresets = [
   },
 ] as const
 
+const recentPresets = [
+  { minutes: 15, label: 'connections.history.last15Minutes' },
+  { minutes: 60, label: 'connections.history.lastHour' },
+] as const
+
 export interface TrafficRange {
   date: string
   startTime: string
@@ -41,6 +46,8 @@ export interface TrafficRange {
 interface Props {
   range: TrafficRange
   onRangeChange: (range: TrafficRange) => void
+  recentMinutes: number | null
+  onRecentChange: (minutes: number) => void
   route: TrafficRoute
   onRouteChange: (route: TrafficRoute) => void
   application: string | null
@@ -52,6 +59,8 @@ const groupStyle = 'inline-flex items-center gap-0.5 rounded-md bg-muted p-0.5'
 export function TrafficHistoryFilters({
   range,
   onRangeChange,
+  recentMinutes,
+  onRecentChange,
   route,
   onRouteChange,
   application,
@@ -68,9 +77,11 @@ export function TrafficHistoryFilters({
     'startTime' | 'endTime'
   > | null>(null)
   const { date, startTime, endTime } = range
-  const activePreset = timePresets.find(
-    (entry) => entry.startTime === startTime && entry.endTime === endTime,
-  )
+  const activePreset =
+    recentMinutes === null &&
+    timePresets.find(
+      (entry) => entry.startTime === startTime && entry.endTime === endTime,
+    )
   const customTimesValid =
     !!draft?.startTime && !!draft.endTime && draft.startTime <= draft.endTime
   const locale =
@@ -116,17 +127,23 @@ export function TrafficHistoryFilters({
           aria-label={t('connections.history.date')}
         >
           <Button
-            variant={date === todayKey ? 'outline' : 'ghost'}
+            variant={
+              recentMinutes === null && date === todayKey ? 'outline' : 'ghost'
+            }
             size="sm"
-            aria-pressed={date === todayKey}
+            aria-pressed={recentMinutes === null && date === todayKey}
             onClick={() => changeDate(todayKey)}
           >
             {t('connections.history.today')}
           </Button>
           <Button
-            variant={date === yesterdayKey ? 'outline' : 'ghost'}
+            variant={
+              recentMinutes === null && date === yesterdayKey
+                ? 'outline'
+                : 'ghost'
+            }
             size="sm"
-            aria-pressed={date === yesterdayKey}
+            aria-pressed={recentMinutes === null && date === yesterdayKey}
             onClick={() => changeDate(yesterdayKey)}
           >
             {t('connections.history.yesterday')}
@@ -156,6 +173,23 @@ export function TrafficHistoryFilters({
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">
+        <div
+          className={groupStyle}
+          role="group"
+          aria-label={t('connections.history.recent')}
+        >
+          {recentPresets.map(({ minutes, label }) => (
+            <Button
+              key={minutes}
+              variant={recentMinutes === minutes ? 'outline' : 'ghost'}
+              size="sm"
+              aria-pressed={recentMinutes === minutes}
+              onClick={() => onRecentChange(minutes)}
+            >
+              {t(label)}
+            </Button>
+          ))}
+        </div>
         <div
           className={groupStyle}
           role="group"
@@ -192,7 +226,7 @@ export function TrafficHistoryFilters({
               aria-label={`${t('connections.history.customTime')} ${timeRangeLabel}`}
             >
               <Clock3 />{' '}
-              {activePreset
+              {activePreset || recentMinutes !== null
                 ? t('connections.history.customTime')
                 : timeRangeLabel}
             </Button>
@@ -261,7 +295,8 @@ export function TrafficHistoryFilters({
           >
             <span className="truncate">
               {t('connections.history.clearApplication', {
-                application: application || t('connections.history.unknown'),
+                application:
+                  application || t('connections.history.unknownApplication'),
               })}
             </span>
             <X />

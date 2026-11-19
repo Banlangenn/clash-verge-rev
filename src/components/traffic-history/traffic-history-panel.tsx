@@ -24,20 +24,21 @@ import {
   type TrafficGrouping,
 } from './traffic-history-breakdown'
 import { TrafficHistoryChart } from './traffic-history-chart'
+import { TrafficHistoryCoverage } from './traffic-history-coverage'
 import {
   DAY_FORMAT,
   TrafficHistoryFilters,
   type TrafficRange,
 } from './traffic-history-filters'
-import { formatTraffic, formatTrafficCost } from './traffic-value'
+import {
+  formatTraffic,
+  formatTrafficCost,
+  type TrafficPeriod,
+} from './traffic-value'
 
 import './traffic-history.css'
 
 const MINUTE = 60
-
-function formatMinute(minute: number) {
-  return dayjs.unix(minute).format('YYYY-MM-DD HH:mm')
-}
 
 const metricIcons = [
   { icon: SwapVertOutlined, color: 'info' },
@@ -59,6 +60,8 @@ export default function TrafficHistoryPanel({ visible }: Props) {
     endTime: '23:59',
   })
   const { date, startTime, endTime } = range
+  const [recentMinutes, setRecentMinutes] = useState<number | null>(null)
+  const [focusedPeriod, setFocusedPeriod] = useState<TrafficPeriod | null>(null)
   const [route, setRoute] = useState<TrafficRoute>('proxy')
   const [grouping, setGrouping] = useState<TrafficGrouping>({
     dimension: 'application',
@@ -69,19 +72,68 @@ export default function TrafficHistoryPanel({ visible }: Props) {
   const until = dayjs(`${date}T${endTime}`).unix() + MINUTE
   const validRange =
     !!date && !!startTime && !!endTime && Number.isFinite(from) && from < until
-  const { data, error, isPending } = useQuery({
-    queryKey: ['traffic-history', from, until, route, dimension, application],
-    queryFn: () =>
-      getTrafficHistory(from, until, route, dimension, application),
-    enabled: visible && validRange,
-    refetchInterval: date === today ? 10_000 : false,
+  const live = recentMinutes !== null || date === today
+  const {
+    data: result,
+    error,
+    isPending,
+  } = useQuery({
+    queryKey: [
+      'traffic-history',
+      recentMinutes ?? from,
+      recentMinutes === null ? until : 'recent',
+      route,
+      dimension,
+      application,
+    ],
+    queryFn: async () => {
+      const recentUntil = dayjs().startOf('minute').unix() + MINUTE
+      const start =
+        recentMinutes === null ? from : recentUntil - recentMinutes * MINUTE
+      const end = recentMinutes === null ? until : recentUntil
+      const summary = await getTrafficHistory(
+        start,
+        end,
+        route,
+        dimension,
+        application,
+      )
+      return { summary, from: start, until: end, recentUntil }
+    },
+    enabled: visible && (validRange || recentMinutes !== null),
+    refetchInterval: live ? 10_000 : false,
     retry: false,
   })
+  const data = result?.summary
+  const focusedQuery = useQuery({
+    queryKey: [
+      'traffic-history-ranking',
+      focusedPeriod?.from,
+      focusedPeriod?.until,
+      route,
+      dimension,
+      application,
+    ],
+    queryFn: () => {
+      if (!focusedPeriod) throw new Error('Missing traffic ranking period')
+      return getTrafficHistory(
+        focusedPeriod.from,
+        focusedPeriod.until,
+        route,
+        dimension,
+        application,
+      )
+    },
+    enabled: visible && focusedPeriod !== null,
+    refetchInterval: live ? 10_000 : false,
+    retry: false,
+  })
+  const ranking = focusedPeriod ? focusedQuery.data : data
 
   const clearApplication = () =>
     setGrouping({ dimension: 'application', application: null })
 
-  const total = (data?.amount.upload ?? 0) + (data?.amount.download ?? 0)
+  const total = (ranking?.amount.upload ?? 0) + (ranking?.amount.download ?? 0)
 
   return (
     <Stack
@@ -91,9 +143,21 @@ export default function TrafficHistoryPanel({ visible }: Props) {
     >
       <TrafficHistoryFilters
         range={range}
-        onRangeChange={setRange}
+        onRangeChange={(next) => {
+          setRange(next)
+          setRecentMinutes(null)
+          setFocusedPeriod(null)
+        }}
+        recentMinutes={recentMinutes}
+        onRecentChange={(minutes) => {
+          setRecentMinutes(minutes)
+          setFocusedPeriod(null)
+        }}
         route={route}
-        onRouteChange={setRoute}
+        onRouteChange={(next) => {
+          setRoute(next)
+          setFocusedPeriod(null)
+        }}
         application={application}
         onClearApplication={clearApplication}
       />
@@ -106,7 +170,7 @@ export default function TrafficHistoryPanel({ visible }: Props) {
       {error && (
         <Alert severity="error">{t('connections.history.readError')}</Alert>
       )}
-      {data && (
+      {data && result && (
         <>
           <Box
             sx={{
@@ -118,7 +182,13 @@ export default function TrafficHistoryPanel({ visible }: Props) {
           >
             {[
               {
-                label: t('connections.history.total'),
+                label: t('connections.history.routeTotal', {
+                  route: t(
+                    route === 'proxy'
+                      ? 'connections.history.proxy'
+                      : 'connections.history.direct',
+                  ),
+                }),
                 value: formatTraffic(total),
               },
               {
@@ -194,11 +264,20 @@ export default function TrafficHistoryPanel({ visible }: Props) {
             >
               {t('connections.history.trend')}
             </Typography>
-            {data.points.length > 0 && data.lastMinute !== null ? (
+            {(data.points.length > 0 || data.sampledMinutes > 0) &&
+            data.lastMinute !== null ? (
               <TrafficHistoryChart
-                from={Math.max(from, data.firstMinute ?? from)}
-                until={Math.min(until, data.lastMinute + MINUTE)}
+                from={
+                  recentMinutes === null
+                    ? Math.max(result.from, data.firstMinute ?? result.from)
+                    : result.from
+                }
+                until={Math.min(result.until, result.recentUntil)}
                 points={data.points}
+                captureMinutes={data.captureMinutes}
+                interruptedMinutes={data.interruptedMinutes}
+                focusedPeriod={focusedPeriod}
+                onFocus={setFocusedPeriod}
               />
             ) : (
               <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
@@ -209,46 +288,25 @@ export default function TrafficHistoryPanel({ visible }: Props) {
                 )}
               </Typography>
             )}
-            <Stack
-              direction="row"
-              spacing={1.5}
-              useFlexGap
-              sx={{
-                flexWrap: 'wrap',
-                borderTop: 1,
-                borderColor: 'divider',
-                pt: 1.25,
-                mt: 1,
-              }}
-            >
-              <Typography variant="caption" color="text.secondary">
-                {t('connections.history.coreTotal')}{' '}
-                {formatTraffic(
-                  data.coreAmount.upload + data.coreAmount.download,
-                )}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {t('connections.history.unattributed')}{' '}
-                {formatTraffic(
-                  data.unattributed.upload + data.unattributed.download,
-                )}
-              </Typography>
-              {data.firstMinute !== null && data.lastMinute !== null && (
-                <Typography variant="caption" color="text.secondary">
-                  {t('connections.history.coverage', {
-                    first: formatMinute(data.firstMinute),
-                    last: formatMinute(data.lastMinute),
-                  })}
-                </Typography>
-              )}
-            </Stack>
+            <TrafficHistoryCoverage summary={data} />
           </Paper>
-          <TrafficHistoryBreakdown
-            total={total}
-            rows={data.breakdown}
-            grouping={grouping}
-            onGroupingChange={setGrouping}
-          />
+          {focusedPeriod && focusedQuery.isPending && (
+            <LinearProgress aria-label={t('connections.history.breakdown')} />
+          )}
+          {focusedPeriod && focusedQuery.error && (
+            <Alert severity="error">{t('connections.history.readError')}</Alert>
+          )}
+          {ranking && (
+            <TrafficHistoryBreakdown
+              total={total}
+              rows={ranking.breakdown}
+              costRows={ranking.costBreakdown}
+              grouping={grouping}
+              onGroupingChange={setGrouping}
+              onClearApplication={clearApplication}
+              focusedPeriod={focusedPeriod}
+            />
+          )}
         </>
       )}
     </Stack>

@@ -37,29 +37,42 @@ export interface TranslationResources {
         afternoon: string
         allDay: string
         application: string
-        bar: string
+        backToApplications: string
+        backToPeriod: string
+        barDetails: string
         breakdown: string
         chart: string
         clearApplication: string
         coreTotal: string
         coverage: string
+        coverageScope: string
         customTime: string
+        dataDetails: string
+        dataGap: string
+        dataGapDetail: string
         date: string
         destination: string
         direct: string
         download: string
         endTime: string
         estimatedCost: string
+        estimatedCostDetail: string
         groupBy: string
         invalidRange: string
+        last15Minutes: string
+        lastHour: string
+        lastSample: string
         morning: string
         node: string
         noSamples: string
         noTraffic: string
         other: string
+        partialCost: string
         proxy: string
         readError: string
+        recent: string
         route: string
+        routeTotal: string
         share: string
         startTime: string
         timeRange: string
@@ -68,8 +81,12 @@ export interface TranslationResources {
         total: string
         trend: string
         unattributed: string
+        unattributedDetail: string
         unknown: string
+        unknownApplication: string
+        unknownApplicationDetail: string
         upload: string
+        viewPeriod: string
         yesterday: string
       }
       page: {

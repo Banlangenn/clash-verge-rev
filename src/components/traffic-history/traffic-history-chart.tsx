@@ -2,8 +2,16 @@ import { useTheme } from '@mui/material'
 import dayjs from 'dayjs'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts'
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ReferenceArea,
+  XAxis,
+  YAxis,
+} from 'recharts'
 
+import { Button } from '@/components/ui/button'
 import {
   ChartContainer,
   ChartLegend,
@@ -13,12 +21,19 @@ import {
 } from '@/components/ui/chart'
 import type { TrafficPoint } from '@/services/bindings'
 
-import { formatTraffic, formatTrafficCost } from './traffic-value'
+import {
+  formatTraffic,
+  formatTrafficCost,
+  formatTrafficPeriod,
+  type TrafficPeriod,
+} from './traffic-value'
 
-interface Props {
-  from: number
-  until: number
+interface Props extends TrafficPeriod {
   points: TrafficPoint[]
+  captureMinutes: number[]
+  interruptedMinutes: number[]
+  focusedPeriod: TrafficPeriod | null
+  onFocus: (period: TrafficPeriod | null) => void
 }
 
 const MINUTE = 60
@@ -28,7 +43,15 @@ function formatTime(time: number) {
   return dayjs.unix(time).format('HH:mm')
 }
 
-export function TrafficHistoryChart({ from, until, points }: Props) {
+export function TrafficHistoryChart({
+  from,
+  until,
+  points,
+  captureMinutes,
+  interruptedMinutes,
+  focusedPeriod,
+  onFocus,
+}: Props) {
   const { t } = useTranslation()
   const { palette } = useTheme()
   const [selectedMinute, setSelectedMinute] = useState<number | null>(null)
@@ -37,14 +60,28 @@ export function TrafficHistoryChart({ from, until, points }: Props) {
     Math.ceil((until - from) / MINUTE / MAX_BARS) * MINUTE,
   )
   const bars = useMemo(() => {
+    const captured = new Set(captureMinutes)
+    const interrupted = new Set(interruptedMinutes)
     const buckets = Array.from(
       { length: Math.ceil((until - from) / step) },
-      (_, index): TrafficPoint => ({
-        minute: from + index * step,
-        upload: 0,
-        download: 0,
-        estimatedCost: null,
-      }),
+      (_, index) => {
+        const minute = from + index * step
+        const end = Math.min(until, minute + step)
+        let gap = false
+        for (let sample = minute; sample < end; sample += MINUTE) {
+          if (!captured.has(sample) || interrupted.has(sample)) {
+            gap = true
+            break
+          }
+        }
+        return {
+          minute,
+          upload: 0,
+          download: 0,
+          estimatedCost: null as number | null,
+          gap,
+        }
+      },
     )
     for (const point of points) {
       const bucket = buckets[Math.floor((point.minute - from) / step)]
@@ -58,8 +95,21 @@ export function TrafficHistoryChart({ from, until, points }: Props) {
       }
     }
     return buckets
-  }, [from, points, step, until])
-  const highest = bars.reduce<TrafficPoint | undefined>(
+  }, [captureMinutes, from, interruptedMinutes, points, step, until])
+  const gapPeriods = useMemo(() => {
+    const periods: TrafficPeriod[] = []
+    for (const bar of bars) {
+      if (!bar.gap) continue
+      const previous = periods.at(-1)
+      if (previous && previous.until + step === bar.minute) {
+        previous.until = bar.minute
+      } else {
+        periods.push({ from: bar.minute, until: bar.minute })
+      }
+    }
+    return periods
+  }, [bars, step])
+  const highest = bars.reduce<(typeof bars)[number] | undefined>(
     (largest, bar) =>
       !largest || bar.upload + bar.download > largest.upload + largest.download
         ? bar
@@ -73,10 +123,16 @@ export function TrafficHistoryChart({ from, until, points }: Props) {
     download: { label: downloadLabel, color: palette.primary.main },
     upload: { label: uploadLabel, color: palette.secondary.main },
   }
-  const describePeriod = (minute: number) =>
-    `${formatTime(minute)}–${formatTime(Math.min(minute + step - MINUTE, until - MINUTE))}`
+  const describePeriod = (minute: number): TrafficPeriod => ({
+    from: minute,
+    until: Math.min(minute + step, until),
+  })
   const selectBar = (_bar: unknown, index: number) =>
     setSelectedMinute(bars[index]?.minute ?? null)
+  const activePeriod = active ? describePeriod(active.minute) : null
+  const focusMatches =
+    focusedPeriod?.from === activePeriod?.from &&
+    focusedPeriod?.until === activePeriod?.until
 
   return (
     <>
@@ -91,8 +147,22 @@ export function TrafficHistoryChart({ from, until, points }: Props) {
           margin={{ top: 10, right: 14 }}
         >
           <CartesianGrid vertical={false} strokeDasharray="3 4" />
+          {gapPeriods.map((period) => (
+            <ReferenceArea
+              key={period.from}
+              x1={period.from}
+              x2={period.until}
+              ifOverflow="hidden"
+              fill={palette.text.disabled}
+              fillOpacity={0.2}
+              stroke="none"
+              pointerEvents="none"
+            />
+          ))}
           <XAxis
             dataKey="minute"
+            allowDuplicatedCategory={false}
+            scale="band"
             tickFormatter={formatTime}
             minTickGap={23}
             tickLine={false}
@@ -108,11 +178,18 @@ export function TrafficHistoryChart({ from, until, points }: Props) {
             content={
               <ChartTooltipContent
                 labelFormatter={(_label, payload) => {
-                  const point = payload[0]?.payload as TrafficPoint | undefined
+                  const point = payload[0]?.payload as
+                    | (typeof bars)[number]
+                    | undefined
                   if (!point || !Number.isFinite(point.minute)) return null
                   return (
                     <>
-                      {describePeriod(point.minute)}
+                      {formatTrafficPeriod(describePeriod(point.minute))}
+                      {point.gap && (
+                        <div className="mt-1 text-muted-foreground">
+                          {t('connections.history.dataGap')}
+                        </div>
+                      )}
                       {point.estimatedCost !== null && (
                         <div className="mt-1.5 flex justify-between gap-2">
                           <span className="font-normal text-muted-foreground">
@@ -157,19 +234,32 @@ export function TrafficHistoryChart({ from, until, points }: Props) {
           />
         </BarChart>
       </ChartContainer>
-      {active && (
-        <p className="mt-1 px-1 text-xs text-muted-foreground">
-          {t('connections.history.bar', {
-            from: formatTime(active.minute),
-            until: formatTime(
-              Math.min(active.minute + step - MINUTE, until - MINUTE),
-            ),
-            upload: formatTraffic(active.upload),
-            download: formatTraffic(active.download),
-          })}
-          {active.estimatedCost !== null &&
-            ` · ${t('connections.history.estimatedCost')} ${formatTrafficCost(active.estimatedCost)}`}
-        </p>
+      {active && activePeriod && (
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 px-1 text-xs text-muted-foreground">
+          <span>
+            {t('connections.history.barDetails', {
+              period: formatTrafficPeriod(activePeriod),
+              upload: formatTraffic(active.upload),
+              download: formatTraffic(active.download),
+            })}
+            {active.estimatedCost !== null &&
+              ` · ${t('connections.history.estimatedCost')} ${formatTrafficCost(active.estimatedCost)}`}
+          </span>
+          {!focusMatches && active.upload + active.download > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onFocus(activePeriod)}
+            >
+              {t('connections.history.viewPeriod')}
+            </Button>
+          )}
+          {focusedPeriod && (
+            <Button variant="ghost" size="sm" onClick={() => onFocus(null)}>
+              {t('connections.history.backToPeriod')}
+            </Button>
+          )}
+        </div>
       )}
     </>
   )
